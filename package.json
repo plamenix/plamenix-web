@@ -1,0 +1,28 @@
+{
+  "name": "@plamenix/web",
+  "version": "1.0.0-beta.0",
+  "description": "Plamenix — Firebird IDE, web edition (Fastify + React + NAPI).",
+  "private": true,
+  "type": "module",
+  "license": "(MIT OR Apache-2.0)",
+  "author": "Zlatan Omerović <zlomerovic@hotmail.com>",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./packages/*\" run dev",
+    "build": "pnpm -r --filter \"./packages/*\" run build",
+    "typecheck": "pnpm -r --filter \"./packages/*\" run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "pnpm -r --filter \"./packages/*\" run test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.4.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^9.0.0"
+  }
+}

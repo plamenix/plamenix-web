@@ -1,0 +1,34 @@
+{
+  "name": "@plamenix/web-client",
+  "version": "1.0.0-beta.0",
+  "description": "React SPA for the Plamenix web edition.",
+  "private": true,
+  "type": "module",
+  "license": "(MIT OR Apache-2.0)",
+  "author": "Zlatan Omerović <zlomerovic@hotmail.com>",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@plamenix/ui": "file:../../../plamenix-ui",
+    "@tanstack/react-query": "^6.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.0",
+    "vitest": "^4.0.0"
+  }
+}
