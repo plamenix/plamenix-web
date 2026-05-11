@@ -4,12 +4,17 @@ import {
   QueryPanel,
   ResultTable,
   type ConnectionForm,
+  type CryptState,
   type QueryResult,
 } from '@plamenix/ui';
 import { fetchTransport } from '@/transport/fetch';
 
 interface ConnectResponse {
   sessionId: string;
+}
+
+interface CryptStateResponse {
+  state: CryptState;
 }
 
 const initialForm: ConnectionForm = {
@@ -19,6 +24,8 @@ const initialForm: ConnectionForm = {
   user: 'SYSDBA',
   password: 'masterkey',
   pureRust: true,
+  encryptionKey: '',
+  encryptionRequired: false,
 };
 
 const initialSql = "SELECT 42 AS answer, 'plamenix' AS name FROM RDB$DATABASE";
@@ -28,6 +35,7 @@ export function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sql, setSql] = useState<string>(initialSql);
   const [result, setResult] = useState<QueryResult | null>(null);
+  const [cryptState, setCryptState] = useState<CryptState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
 
@@ -38,6 +46,7 @@ export function App() {
   const handleConnect = async () => {
     setError(null);
     setBusy(true);
+    setCryptState(null);
     try {
       const response = await fetchTransport.invoke<ConnectResponse>('connect', {
         host: form.host,
@@ -45,15 +54,28 @@ export function App() {
         database: form.database,
         user: form.user,
         password: form.password,
-        encryptionRequired: false,
+        encryptionKey: form.encryptionKey === '' ? undefined : form.encryptionKey,
+        encryptionRequired: form.encryptionRequired,
         pureRust: form.pureRust,
       });
       setSessionId(response.sessionId);
       setResult(null);
+      void refreshCryptState(response.sessionId);
     } catch (err) {
       setError(String(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const refreshCryptState = async (id: string) => {
+    try {
+      const res = await fetchTransport.invoke<CryptStateResponse>('crypt-state', {
+        sessionId: id,
+      });
+      setCryptState(res.state);
+    } catch {
+      setCryptState(null);
     }
   };
 
@@ -79,6 +101,7 @@ export function App() {
       await fetchTransport.invoke<{ closed: boolean }>('close', { sessionId });
       setSessionId(null);
       setResult(null);
+      setCryptState(null);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -105,6 +128,7 @@ export function App() {
           sessionId={sessionId}
           sql={sql}
           busy={busy}
+          cryptState={cryptState}
           onSqlChange={setSql}
           onExecute={handleExecute}
           onClose={handleClose}
