@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@plamenix/ui": "file:../../../plamenix-ui",
+    "@plamenix/ui": "link:../../../plamenix-ui",
     "@tanstack/react-query": "^5.100.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

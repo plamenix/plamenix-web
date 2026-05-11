@@ -27,8 +27,8 @@ importers:
   packages/client:
     dependencies:
       '@plamenix/ui':
-        specifier: file:../../../plamenix-ui
-        version: file:../plamenix-ui(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+        specifier: link:../../../plamenix-ui
+        version: link:../../../plamenix-ui
       '@tanstack/react-query':
         specifier: ^5.100.0
         version: 5.100.9(react@19.2.6)
@@ -919,13 +919,6 @@ packages:
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
-
-  '@plamenix/ui@file:../plamenix-ui':
-    resolution: {directory: ../plamenix-ui, type: directory}
-    engines: {node: '>=20'}
-    peerDependencies:
-      react: ^19
-      react-dom: ^19
 
   '@rolldown/binding-android-arm64@1.0.0-rc.18':
     resolution: {integrity: sha512-lIDyUAfD7U3+BWKzdxMbJcsYHuqXqmGz40aeRqvuAm3y5TkJSYTBW2RDrn65DJFPQqVjUAUqq5uz8urzQ8aBdQ==}
@@ -2917,11 +2910,6 @@ snapshots:
   '@oxc-project/types@0.128.0': {}
 
   '@pinojs/redact@0.4.0': {}
-
-  '@plamenix/ui@file:../plamenix-ui(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
-    dependencies:
-      react: 19.2.6
-      react-dom: 19.2.6(react@19.2.6)
 
   '@rolldown/binding-android-arm64@1.0.0-rc.18':
     optional: true
