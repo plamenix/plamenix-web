@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_db::{
-    ConnectMode, ConnectionConfig as DbConnectionConfig, DbDriver, RsfbDriver,
+    ConnectMode, ConnectionConfig as DbConnectionConfig, CryptState, DbDriver, RsfbDriver,
     SessionId as DbSessionId,
 };
 
@@ -127,6 +127,22 @@ pub async fn close(session_id: String) -> Result<()> {
         .close(session)
         .await
         .map_err(|err| Error::from_reason(err.to_string()))
+}
+
+#[napi]
+pub async fn crypt_state(session_id: String) -> Result<String> {
+    let session = parse_session(&session_id)?;
+    let state = driver()
+        .crypt_state(session)
+        .await
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    Ok(match state {
+        CryptState::Unencrypted => "unencrypted",
+        CryptState::Encrypted => "encrypted",
+        CryptState::DecryptInProgress => "decrypt_in_progress",
+        CryptState::EncryptInProgress => "encrypt_in_progress",
+    }
+    .to_owned())
 }
 
 fn parse_session(raw: &str) -> Result<DbSessionId> {

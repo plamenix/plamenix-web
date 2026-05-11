@@ -48,4 +48,21 @@ export async function executeRoute(app: FastifyInstance): Promise<void> {
       });
     }
   });
+
+  app.post('/api/crypt-state', async (request, reply) => {
+    const sessionId = (request.body as { sessionId?: unknown })?.sessionId;
+    if (typeof sessionId !== 'string' || !sessionStore.has(sessionId)) {
+      return reply.code(400).send({ error: 'invalid_session' });
+    }
+    try {
+      const state = await fbclient.cryptState(sessionId);
+      return { state };
+    } catch (err) {
+      app.log.warn({ err }, 'crypt-state failed');
+      return reply.code(502).send({
+        error: 'crypt_state_failed',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 }
