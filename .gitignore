@@ -10,7 +10,6 @@ target/
 **/*.rs.bk
 packages/fbclient-node/*.node
 packages/fbclient-node/npm/
-packages/fbclient-node/index.d.ts
 
 # Editors
 .idea/
