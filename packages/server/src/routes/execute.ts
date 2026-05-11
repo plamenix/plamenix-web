@@ -65,4 +65,21 @@ export async function executeRoute(app: FastifyInstance): Promise<void> {
       });
     }
   });
+
+  app.post('/api/describe-schema', async (request, reply) => {
+    const sessionId = (request.body as { sessionId?: unknown })?.sessionId;
+    if (typeof sessionId !== 'string' || !sessionStore.has(sessionId)) {
+      return reply.code(400).send({ error: 'invalid_session' });
+    }
+    try {
+      const schema = await fbclient.describeSchema(sessionId);
+      return schema;
+    } catch (err) {
+      app.log.warn({ err }, 'describe-schema failed');
+      return reply.code(502).send({
+        error: 'describe_schema_failed',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 }

@@ -130,6 +130,16 @@ pub async fn close(session_id: String) -> Result<()> {
 }
 
 #[napi]
+pub async fn describe_schema(session_id: String) -> Result<serde_json::Value> {
+    let session = parse_session(&session_id)?;
+    let schema = driver()
+        .describe_schema(session)
+        .await
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    serde_json::to_value(&schema).map_err(|err| Error::from_reason(err.to_string()))
+}
+
+#[napi]
 pub async fn crypt_state(session_id: String) -> Result<String> {
     let session = parse_session(&session_id)?;
     let state = driver()

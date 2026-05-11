@@ -6,6 +6,19 @@ export declare function connect(config: ConnectionConfig): Promise<ConnectionHan
 
 export declare function cryptState(sessionId: string): Promise<'unencrypted' | 'encrypted' | 'decrypt_in_progress' | 'encrypt_in_progress'>
 
+export declare function describeSchema(sessionId: string): Promise<{
+  tables: Array<{
+    name: string
+    kind: 'table' | 'view'
+    columns: Array<{
+      name: string
+      position: number
+      sqlType: string
+      nullable: boolean
+    }>
+  }>
+}>
+
 /**
  * Connection configuration mirrored from [`plamenix_db::ConnectionConfig`].
  *
