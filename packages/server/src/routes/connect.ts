@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import * as fbclient from '@plamenix/fbclient-node';
+import { sessionStore } from '../sessions/store.js';
 
 const connectBody = z.object({
   host: z.string().min(1),
@@ -10,6 +12,7 @@ const connectBody = z.object({
   encryptionKey: z.string().optional(),
   fbclientPath: z.string().optional(),
   encryptionRequired: z.boolean().default(false),
+  pureRust: z.boolean().default(false),
 });
 
 export async function connectRoute(app: FastifyInstance): Promise<void> {
@@ -19,12 +22,16 @@ export async function connectRoute(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
     }
 
-    // TODO: call into @plamenix/fbclient-node once the native binary is built.
-    // The stub binding currently throws, so connect() is parked behind a
-    // feature flag in M1 until plamenix-db lands.
-    return reply.code(501).send({
-      error: 'not_implemented',
-      message: 'connect lands after plamenix-db crate ships',
-    });
+    try {
+      const handle = await fbclient.connect(parsed.data);
+      sessionStore.register(handle.sessionId);
+      return { sessionId: handle.sessionId };
+    } catch (err) {
+      app.log.warn({ err }, 'connect failed');
+      return reply.code(502).send({
+        error: 'connect_failed',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 }

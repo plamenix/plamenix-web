@@ -2,9 +2,10 @@
 
 Web edition of Plamenix. Three packages in a pnpm workspace:
 
-- `@plamenix/fbclient-node` — NAPI bindings to rsfbclient. Native npm
-  module published per platform. See `../plamenix/docs/napi-rsfbclient.md`
-  and ADR `0014-napi-rsfbclient-bindings.md`.
+- `@plamenix/fbclient-node` — NAPI bindings to `plamenix-db` (which
+  itself wraps rsfbclient). Native npm module published per platform.
+  See `../plamenix/docs/napi-rsfbclient.md` and ADR
+  `0014-napi-rsfbclient-bindings.md`.
 - `@plamenix/web-server` — Fastify backend. Owns sessions, talks to
   Firebird through the NAPI binding.
 - `@plamenix/web-client` — React SPA. Consumes `@plamenix/ui` and the
@@ -18,9 +19,9 @@ state, encryption), read `../plamenix/docs/` and `../plamenix/docs/adr/`.
 ```
 packages/
   fbclient-node/      NAPI module
-    Cargo.toml        crate `plamenix-fbclient-node`, deps napi-rs + plamenix-types
+    Cargo.toml        crate `plamenix-fbclient-node`, deps napi-rs + plamenix-db + plamenix-types
     build.rs          napi_build::setup()
-    src/lib.rs        #[napi] ping + connect stub
+    src/lib.rs        #[napi] ping / connect / execute / pingSession / close
     package.json      @napi-rs/cli scripts
     index.js          loader stub (overwritten by `napi build`)
     index.d.ts        hand-maintained until first build
@@ -28,7 +29,7 @@ packages/
     src/main.ts       bootstrap
     src/app.ts        buildApp() — registers helmet, cors, sensible, routes
     src/env.ts        zod-validated env loader
-    src/routes/       per-endpoint route files
+    src/routes/       per-endpoint route files (ping, connect, execute, close)
     src/sessions/     in-memory session store (Redis later)
     test/             vitest + Fastify inject
   client/             React SPA

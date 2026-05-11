@@ -1,24 +1,25 @@
-// In-memory session store for M1. Each session owns one Firebird
-// attachment plus its per-tab metadata. Swap for Redis or a similar
-// shared store in M2 when multi-instance deployment is in scope.
+// In-memory session store for M1. Each entry remembers a Firebird
+// attachment held inside `@plamenix/fbclient-node`. The native binding
+// owns the actual connection; this store tracks bookkeeping (creation
+// time, optional metadata) so we can expire stale sessions or report
+// active count from the server side.
 
 export interface Session {
   id: string;
   createdAt: number;
-  // database handle lands here once @plamenix/fbclient-node exposes it
 }
 
 class SessionStore {
   private readonly sessions = new Map<string, Session>();
 
-  create(id: string): Session {
+  register(id: string): Session {
     const session: Session = { id, createdAt: Date.now() };
     this.sessions.set(id, session);
     return session;
   }
 
-  get(id: string): Session | undefined {
-    return this.sessions.get(id);
+  has(id: string): boolean {
+    return this.sessions.has(id);
   }
 
   drop(id: string): boolean {

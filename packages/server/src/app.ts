@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import sensible from '@fastify/sensible';
 import { pingRoute } from './routes/ping.js';
 import { connectRoute } from './routes/connect.js';
+import { executeRoute } from './routes/execute.js';
 import type { Env } from './env.js';
 
 export async function buildApp(env: Env): Promise<FastifyInstance> {
@@ -24,6 +25,7 @@ export async function buildApp(env: Env): Promise<FastifyInstance> {
 
   await app.register(pingRoute);
   await app.register(connectRoute);
+  await app.register(executeRoute);
 
   return app;
 }
