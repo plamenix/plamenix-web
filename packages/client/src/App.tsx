@@ -13,6 +13,8 @@ import {
   type QueryResult,
   type Schema,
   type TabState,
+  type TableAction,
+  type TableInfo,
 } from '@plamenix/ui';
 import { fetchTransport } from '@/transport/fetch';
 import {
@@ -35,6 +37,35 @@ interface CryptStateResponse {
 function deriveTitle(form: ConnectionForm): string {
   const last = form.database.split(/[\\/]/).pop() ?? form.database;
   return `${form.host}/${last}`;
+}
+
+function quoteIdent(name: string): string {
+  if (/^[A-Z_][A-Z0-9_]*$/.test(name)) return name;
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+function ddlTemplate(action: TableAction, table: TableInfo): string {
+  const ident = quoteIdent(table.name);
+  switch (action) {
+    case 'drop':
+      return `DROP ${table.kind === 'view' ? 'VIEW' : 'TABLE'} ${ident};`;
+    case 'alter':
+      return [
+        `ALTER TABLE ${ident}`,
+        `    ADD <column_name> <data_type>;`,
+        ``,
+        `-- Replace with the change you want. Firebird also supports:`,
+        `--   DROP <column_name>`,
+        `--   ALTER <column_name> TYPE <data_type>`,
+        `--   ALTER <column_name> SET DEFAULT <expr> / DROP DEFAULT`,
+        `--   ADD CONSTRAINT <name> ...`,
+      ].join('\n');
+    case 'create-index': {
+      const firstCol = table.columns[0]?.name ?? 'column_name';
+      const idxName = `IDX_${table.name}_${firstCol}`;
+      return `CREATE INDEX ${quoteIdent(idxName)} ON ${ident} (${quoteIdent(firstCol)});`;
+    }
+  }
 }
 
 export function App() {
@@ -241,6 +272,37 @@ export function App() {
     }
   };
 
+  const handleTableAction = async (action: TableAction, table: TableInfo) => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    const sql = ddlTemplate(action, table);
+    if (action !== 'drop') {
+      patchTab(tabId, { sql });
+      return;
+    }
+    if (
+      !window.confirm(
+        `Drop ${table.kind === 'view' ? 'view' : 'table'} ${table.name}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    if (!tab.sessionId) return;
+    patchTab(tabId, { error: null, busy: true, sql });
+    try {
+      const res = await fetchTransport.invoke<QueryResult>('execute', {
+        sessionId: tab.sessionId,
+        sql,
+      });
+      patchTab(tabId, { result: res });
+      void refreshSchema(tabId, tab.sessionId);
+    } catch (err) {
+      patchTab(tabId, { error: String(err) });
+    } finally {
+      patchTab(tabId, { busy: false });
+    }
+  };
+
   const handleDisconnect = async () => {
     const tabId = activeTabId;
     const tab = activeTab;
@@ -303,6 +365,7 @@ export function App() {
               void refreshSchema(activeTabId, activeTab.sessionId);
             }
           }}
+          onTableAction={handleTableAction}
         />
       )}
     </div>
@@ -373,6 +436,7 @@ interface SessionViewProps {
   onExecute: () => void;
   onDisconnect: () => void;
   onRefreshSchema: () => void;
+  onTableAction: (action: TableAction, table: TableInfo) => void;
 }
 
 function SessionView({
@@ -381,6 +445,7 @@ function SessionView({
   onExecute,
   onDisconnect,
   onRefreshSchema,
+  onTableAction,
 }: SessionViewProps) {
   if (!tab.sessionId) return null;
   return (
@@ -395,6 +460,7 @@ function SessionView({
               tab.sql.length > 0 && !tab.sql.endsWith(' ') ? `${tab.sql} ${id}` : `${tab.sql}${id}`,
             )
           }
+          onAction={onTableAction}
         />
       </div>
       <main className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
