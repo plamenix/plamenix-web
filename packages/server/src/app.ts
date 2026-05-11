@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import sensible from '@fastify/sensible';
@@ -7,17 +7,22 @@ import { connectRoute } from './routes/connect.js';
 import { executeRoute } from './routes/execute.js';
 import type { Env } from './env.js';
 
-export async function buildApp(env: Env): Promise<FastifyInstance> {
-  const app = Fastify({
-    logger: {
-      level: env.LOG_LEVEL,
-      transport:
-        env.NODE_ENV === 'development'
-          ? { target: 'pino-pretty', options: { translateTime: 'SYS:standard' } }
-          : undefined,
-    },
-    disableRequestLogging: false,
-  });
+// `Fastify(...)` returns a richer generic than the bare `FastifyInstance`
+// alias; letting TS infer the return type from the body avoids a
+// Http2SecureServer / RawServerDefault mismatch under `exactOptionalPropertyTypes`.
+export type App = Awaited<ReturnType<typeof buildApp>>;
+
+export async function buildApp(env: Env) {
+  const logger:
+    | {
+        level: typeof env.LOG_LEVEL;
+        transport?: { target: string; options: { translateTime: string } };
+      } = { level: env.LOG_LEVEL };
+  if (env.NODE_ENV === 'development') {
+    logger.transport = { target: 'pino-pretty', options: { translateTime: 'SYS:standard' } };
+  }
+
+  const app = Fastify({ logger, disableRequestLogging: false });
 
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, { origin: env.NODE_ENV === 'development' ? true : false });

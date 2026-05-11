@@ -5,9 +5,8 @@
     "jsx": "react-jsx",
     "useDefineForClassFields": true,
     "types": ["vite/client"],
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "outDir": "dist"
   },

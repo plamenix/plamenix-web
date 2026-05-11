@@ -1,10 +1,9 @@
 import { describe, it, expect, afterAll, beforeAll } from 'vitest';
-import type { FastifyInstance } from 'fastify';
-import { buildApp } from '../src/app.js';
+import { buildApp, type App } from '../src/app.js';
 import { loadEnv } from '../src/env.js';
 
 describe('plamenix-web server', () => {
-  let app: FastifyInstance;
+  let app: App;
 
   beforeAll(async () => {
     app = await buildApp(loadEnv({ NODE_ENV: 'test', LOG_LEVEL: 'error' } as NodeJS.ProcessEnv));

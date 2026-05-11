@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import * as fbclient from '@plamenix/fbclient-node';
+import type { ConnectionConfig } from '@plamenix/fbclient-node';
 import { sessionStore } from '../sessions/store.js';
 
 const connectBody = z.object({
@@ -23,7 +24,24 @@ export async function connectRoute(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const handle = await fbclient.connect(parsed.data);
+      const config: ConnectionConfig = {
+        host: parsed.data.host,
+        port: parsed.data.port,
+        database: parsed.data.database,
+        user: parsed.data.user,
+        password: parsed.data.password,
+        encryptionRequired: parsed.data.encryptionRequired,
+      };
+      if (parsed.data.encryptionKey !== undefined) {
+        config.encryptionKey = parsed.data.encryptionKey;
+      }
+      if (parsed.data.fbclientPath !== undefined) {
+        config.fbclientPath = parsed.data.fbclientPath;
+      }
+      if (parsed.data.pureRust) {
+        config.pureRust = true;
+      }
+      const handle = await fbclient.connect(config);
       sessionStore.register(handle.sessionId);
       return { sessionId: handle.sessionId };
     } catch (err) {
