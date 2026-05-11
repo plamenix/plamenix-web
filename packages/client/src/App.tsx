@@ -120,11 +120,45 @@ export function App() {
     const tabId = activeTabId;
     const id = activeTab.selectedProfileId;
     if (id === null) return;
+    const existing = profiles.find((p) => p.id === id);
+    const label = existing?.name ?? 'this profile';
+    if (!window.confirm(`Delete "${label}"?`)) return;
     patchTab(tabId, { error: null, busy: true });
     try {
       await deleteProfile(id);
       await refreshProfiles();
       patchTab(tabId, { selectedProfileId: null, profileName: '' });
+    } catch (err) {
+      patchTab(tabId, { error: String(err) });
+    } finally {
+      patchTab(tabId, { busy: false });
+    }
+  };
+
+  const handleRenameProfile = async () => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    const id = tab.selectedProfileId;
+    if (id === null) return;
+    const existing = profiles.find((p) => p.id === id);
+    if (!existing) return;
+    const newName = tab.profileName.trim();
+    if (newName === '' || newName === existing.name) return;
+    patchTab(tabId, { error: null, busy: true });
+    try {
+      const draft: ProfileDraft = {
+        id: existing.id,
+        name: newName,
+        host: existing.host,
+        port: existing.port,
+        database: existing.database,
+        user: existing.user,
+        encryptionRequired: existing.encryptionRequired,
+        pureRust: existing.pureRust,
+      };
+      const saved = await saveProfile(draft);
+      await refreshProfiles();
+      patchTab(tabId, { selectedProfileId: saved.id, profileName: saved.name });
     } catch (err) {
       patchTab(tabId, { error: String(err) });
     } finally {
@@ -255,6 +289,7 @@ export function App() {
           onProfileNameChange={(v) => patchTab(activeTabId, { profileName: v })}
           onSaveProfile={handleSaveProfile}
           onDeleteProfile={handleDeleteProfile}
+          onRenameProfile={handleRenameProfile}
           onConnect={handleConnect}
         />
       ) : (
@@ -282,6 +317,7 @@ interface ConnectViewProps {
   onProfileNameChange: (value: string) => void;
   onSaveProfile: () => void;
   onDeleteProfile: () => void;
+  onRenameProfile: () => void;
   onConnect: () => void;
 }
 
@@ -293,6 +329,7 @@ function ConnectView({
   onProfileNameChange,
   onSaveProfile,
   onDeleteProfile,
+  onRenameProfile,
   onConnect,
 }: ConnectViewProps) {
   return (
@@ -311,6 +348,7 @@ function ConnectView({
         onNameChange={onProfileNameChange}
         onSave={onSaveProfile}
         onDelete={onDeleteProfile}
+        onRename={onRenameProfile}
       />
 
       <ConnectionPanel
