@@ -30,3 +30,10 @@ fmt:
 test:
     cd packages/fbclient-node && cargo test --all-features
     pnpm test
+
+# Regenerate client favicons from the branding sibling repo.
+# Run after a plamenix-branding update.
+refresh-icons:
+    rm -rf packages/client/public/favicon
+    mkdir -p packages/client/public/favicon
+    cp ../plamenix-branding/build/favicon/* packages/client/public/favicon/
