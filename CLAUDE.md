@@ -28,9 +28,10 @@ packages/
   server/             Fastify backend
     src/main.ts       bootstrap
     src/app.ts        buildApp() — registers helmet, cors, sensible, routes
-    src/env.ts        zod-validated env loader
-    src/routes/       per-endpoint route files (ping, connect, execute, close)
+    src/env.ts        zod-validated env loader (incl. PROFILES_PATH)
+    src/routes/       per-endpoint route files (ping, connect, execute, close, profiles)
     src/sessions/     in-memory session store (Redis later)
+    src/profiles/     JSON-file connection profile store (no secrets server-side)
     test/             vitest + Fastify inject
   client/             React SPA
     src/main.tsx      root + QueryClientProvider

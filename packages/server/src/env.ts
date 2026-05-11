@@ -5,6 +5,7 @@ const schema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  PROFILES_PATH: z.string().default('./profiles.json'),
 });
 
 export type Env = z.infer<typeof schema>;

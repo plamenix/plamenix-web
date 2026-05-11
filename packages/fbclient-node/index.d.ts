@@ -4,6 +4,8 @@ export declare function close(sessionId: string): Promise<void>
 
 export declare function connect(config: ConnectionConfig): Promise<ConnectionHandle>
 
+export declare function cryptState(sessionId: string): Promise<'unencrypted' | 'encrypted' | 'decrypt_in_progress' | 'encrypt_in_progress'>
+
 /**
  * Connection configuration mirrored from [`plamenix_db::ConnectionConfig`].
  *
