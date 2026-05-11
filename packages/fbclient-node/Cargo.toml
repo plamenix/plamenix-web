@@ -20,7 +20,7 @@ napi-derive = "3"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 plamenix-types = { path = "../../../plamenix-core/crates/plamenix-types" }
-plamenix-db = { path = "../../../plamenix-core/crates/plamenix-db", default-features = false, features = ["pure-rust"] }
+plamenix-db = { path = "../../../plamenix-core/crates/plamenix-db", default-features = false, features = ["pure-rust", "native"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 
