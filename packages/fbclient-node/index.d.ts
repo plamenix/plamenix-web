@@ -4,21 +4,6 @@ export declare function close(sessionId: string): Promise<void>
 
 export declare function connect(config: ConnectionConfig): Promise<ConnectionHandle>
 
-export declare function cryptState(sessionId: string): Promise<'unencrypted' | 'encrypted' | 'decrypt_in_progress' | 'encrypt_in_progress'>
-
-export declare function describeSchema(sessionId: string): Promise<{
-  tables: Array<{
-    name: string
-    kind: 'table' | 'view'
-    columns: Array<{
-      name: string
-      position: number
-      sqlType: string
-      nullable: boolean
-    }>
-  }>
-}>
-
 /**
  * Connection configuration mirrored from [`plamenix_db::ConnectionConfig`].
  *
@@ -34,6 +19,7 @@ export interface ConnectionConfig {
   password: string
   encryptionKey?: string
   fbclientPath?: string
+  charset?: string
   encryptionRequired: boolean
   pureRust?: boolean
 }
@@ -42,7 +28,55 @@ export interface ConnectionHandle {
   sessionId: string
 }
 
+export declare function cryptState(sessionId: string): Promise<string>
+
+export declare function databaseStats(sessionId: string): Promise<any>
+
+export declare function describeSchema(sessionId: string): Promise<any>
+
 export declare function execute(sessionId: string, sql: string): Promise<any>
+
+/**
+ * Splits `sql` into statements, applies the per-statement row cap to
+ * SELECT-like queries, executes each in order, and returns one
+ * [`StatementOutcome`] per parsed statement. Aborts after the first
+ * failure (mirroring the Tauri command).
+ */
+export declare function executeBatch(sessionId: string, sql: string): Promise<any>
+
+/**
+ * Runs the export pipeline server-side: executes one or more SELECTs,
+ * then builds a CSV / JSON / SQL / XML deliverable using the shared
+ * `plamenix-db::export` formatters. Returns the full text. The
+ * HTTP route on top is responsible for chunked transfer to the
+ * client.
+ */
+export declare function exportQuery(sessionId: string, format: string, csvDelimiter: string, scopeJson: string, includeDdl?: boolean | undefined | null): Promise<string>
+
+export declare function fetchBlob(sessionId: string, blobId: string): Promise<string>
+
+/**
+ * Initialises the global `tracing` subscriber for the Node process.
+ *
+ * Idempotent: subsequent calls return `"already_initialised"` without
+ * touching the subscriber. The OTLP exporter only attaches when the
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable is set; otherwise
+ * only the fmt layer is installed.
+ *
+ * Returns a short status string for the caller to log:
+ * - `"fmt_only"` — fmt layer attached, no OTLP exporter.
+ * - `"otlp:<endpoint>"` — OTLP exporter attached, shipping to endpoint.
+ * - `"already_initialised"` — a previous call installed the subscriber.
+ */
+export declare function initTracing(): string
+
+/**
+ * Reads the host's `databases.conf` (when one is found at a known
+ * install path) and returns the simple-form alias entries declared in
+ * it. When no candidate file exists, returns an empty list with
+ * `sourcePath = null`.
+ */
+export declare function listAliases(): any
 
 /** Returns a static pong string. Smoke test that the binding loaded. */
 export declare function ping(): string
@@ -52,3 +86,11 @@ export interface PingResult {
 }
 
 export declare function pingSession(sessionId: string): Promise<PingResult>
+
+/**
+ * Tries to attach with the supplied configuration, fetches the engine
+ * version, then closes the session. Always resolves with a structured
+ * result (no thrown error on a clean failure); the `ok` flag tells the
+ * caller whether the attempt succeeded.
+ */
+export declare function testConnection(config: ConnectionConfig): Promise<any>

@@ -578,6 +578,15 @@ if (!nativeBinding) {
 module.exports = nativeBinding
 module.exports.close = nativeBinding.close
 module.exports.connect = nativeBinding.connect
+module.exports.cryptState = nativeBinding.cryptState
+module.exports.databaseStats = nativeBinding.databaseStats
+module.exports.describeSchema = nativeBinding.describeSchema
 module.exports.execute = nativeBinding.execute
+module.exports.executeBatch = nativeBinding.executeBatch
+module.exports.exportQuery = nativeBinding.exportQuery
+module.exports.fetchBlob = nativeBinding.fetchBlob
+module.exports.initTracing = nativeBinding.initTracing
+module.exports.listAliases = nativeBinding.listAliases
 module.exports.ping = nativeBinding.ping
 module.exports.pingSession = nativeBinding.pingSession
+module.exports.testConnection = nativeBinding.testConnection

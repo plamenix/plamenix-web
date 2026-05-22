@@ -6,6 +6,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   PROFILES_PATH: z.string().default('./profiles.json'),
+  HISTORY_PATH: z.string().default('./history.sqlite'),
 });
 
 export type Env = z.infer<typeof schema>;

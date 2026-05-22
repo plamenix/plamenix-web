@@ -5,7 +5,10 @@ import sensible from '@fastify/sensible';
 import { pingRoute } from './routes/ping.js';
 import { connectRoute } from './routes/connect.js';
 import { executeRoute } from './routes/execute.js';
+import { exportRoute } from './routes/export.js';
+import { historyRoute } from './routes/history.js';
 import { profilesRoute } from './routes/profiles.js';
+import { HistoryStore } from './history/store.js';
 import { ProfileStore } from './profiles/store.js';
 import type { Env } from './env.js';
 
@@ -31,11 +34,14 @@ export async function buildApp(env: Env) {
   await app.register(sensible);
 
   const profileStore = new ProfileStore(env.PROFILES_PATH);
+  const historyStore = new HistoryStore(env.HISTORY_PATH);
 
   await app.register(pingRoute);
   await app.register(connectRoute);
-  await app.register(executeRoute);
+  await app.register(executeRoute(historyStore));
+  await app.register(exportRoute);
   await app.register(profilesRoute(profileStore));
+  await app.register(historyRoute(historyStore));
 
   return app;
 }

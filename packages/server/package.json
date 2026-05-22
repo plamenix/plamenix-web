@@ -22,11 +22,13 @@
     "@fastify/helmet": "^13.0.0",
     "@fastify/sensible": "^6.0.0",
     "@plamenix/fbclient-node": "workspace:*",
+    "better-sqlite3": "^12.5.0",
     "fastify": "^5.8.0",
     "pino-pretty": "^13.1.0",
     "zod": "^4.4.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.0"

@@ -14,6 +14,9 @@ const saveBody = z.object({
   user: z.string().min(1),
   encryptionRequired: z.boolean().default(false),
   pureRust: z.boolean().default(false),
+  color: z.string().optional(),
+  fbclientPath: z.string().optional(),
+  charset: z.string().optional(),
 });
 
 const connectBody = z.object({
@@ -22,6 +25,7 @@ const connectBody = z.object({
   pureRust: z.boolean().optional(),
   encryptionRequired: z.boolean().optional(),
   fbclientPath: z.string().optional(),
+  charset: z.string().optional(),
 });
 
 export function profilesRoute(store: ProfileStore) {
@@ -45,6 +49,15 @@ export function profilesRoute(store: ProfileStore) {
       if (parsed.data.id !== undefined) {
         draft.id = parsed.data.id;
       }
+      if (parsed.data.color !== undefined) {
+        draft.color = parsed.data.color;
+      }
+      if (parsed.data.fbclientPath !== undefined) {
+        draft.fbclientPath = parsed.data.fbclientPath;
+      }
+      if (parsed.data.charset !== undefined) {
+        draft.charset = parsed.data.charset;
+      }
       const profile = await store.save(draft);
       return { profile };
     });
@@ -53,6 +66,18 @@ export function profilesRoute(store: ProfileStore) {
       await store.delete(request.params.id);
       return reply.code(204).send();
     });
+
+    app.post<{ Params: { id: string } }>(
+      '/api/profiles/:id/touch-disconnected',
+      async (request, reply) => {
+        const profile = await store.get(request.params.id);
+        if (!profile) {
+          return reply.code(404).send({ error: 'unknown_profile' });
+        }
+        await store.touchDisconnected(profile.id);
+        return reply.code(204).send();
+      },
+    );
 
     app.post<{ Params: { id: string } }>(
       '/api/profiles/:id/connect',
@@ -78,8 +103,13 @@ export function profilesRoute(store: ProfileStore) {
         if (parsed.data.encryptionKey !== undefined) {
           config.encryptionKey = parsed.data.encryptionKey;
         }
-        if (parsed.data.fbclientPath !== undefined) {
-          config.fbclientPath = parsed.data.fbclientPath;
+        const fbclientPath = parsed.data.fbclientPath ?? profile.fbclientPath ?? null;
+        if (typeof fbclientPath === 'string' && fbclientPath.length > 0) {
+          config.fbclientPath = fbclientPath;
+        }
+        const charset = parsed.data.charset ?? profile.charset ?? null;
+        if (typeof charset === 'string' && charset.length > 0) {
+          config.charset = charset;
         }
         if (parsed.data.pureRust ?? profile.pureRust) {
           config.pureRust = true;
@@ -88,6 +118,10 @@ export function profilesRoute(store: ProfileStore) {
         try {
           const handle = await fbclient.connect(config);
           sessionStore.register(handle.sessionId);
+          // Best-effort: touch failure should not break the connect.
+          store.touch(profile.id).catch((err) => {
+            app.log.warn({ err, profileId: profile.id }, 'profile touch failed');
+          });
           return { sessionId: handle.sessionId };
         } catch (err) {
           app.log.warn({ err }, 'profile connect failed');

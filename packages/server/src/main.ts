@@ -1,8 +1,21 @@
+import * as fbclient from '@plamenix/fbclient-node';
 import { buildApp } from './app.js';
 import { loadEnv } from './env.js';
 
 async function main(): Promise<void> {
   const env = loadEnv();
+
+  // Bootstrap the Rust-side tracing subscriber before any driver call so
+  // the very first `connect`/`execute` produces structured spans. The
+  // OTLP exporter only attaches when `OTEL_EXPORTER_OTLP_ENDPOINT` is
+  // set in the environment.
+  try {
+    const status = fbclient.initTracing();
+    process.stderr.write(`fbclient-node tracing: ${status}\n`);
+  } catch (err) {
+    process.stderr.write(`fbclient-node tracing init failed: ${String(err)}\n`);
+  }
+
   const app = await buildApp(env);
 
   try {

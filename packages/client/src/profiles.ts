@@ -17,6 +17,13 @@ export interface ProfileDraft {
   user: string;
   encryptionRequired: boolean;
   pureRust: boolean;
+  color?: string | null;
+  /** Absolute path to a native Firebird client library. Omit / empty
+   *  for auto-detect. */
+  fbclientPath?: string;
+  /** Wire charset (`UTF8`, `WIN1250`, …). Omit / empty falls back to
+   *  `UTF8`. */
+  charset?: string;
 }
 
 export interface ProfileConnectArgs {
@@ -25,6 +32,7 @@ export interface ProfileConnectArgs {
   pureRust?: boolean;
   encryptionRequired?: boolean;
   fbclientPath?: string;
+  charset?: string;
 }
 
 async function expectOk(response: Response, label: string): Promise<void> {
@@ -55,6 +63,14 @@ export async function saveProfile(draft: ProfileDraft): Promise<Profile> {
 export async function deleteProfile(id: string): Promise<void> {
   const res = await fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
   await expectOk(res, 'delete profile');
+}
+
+export async function touchProfileDisconnected(id: string): Promise<void> {
+  const res = await fetch(
+    `/api/profiles/${encodeURIComponent(id)}/touch-disconnected`,
+    { method: 'POST' },
+  );
+  await expectOk(res, 'touch profile disconnected');
 }
 
 export async function connectByProfile(

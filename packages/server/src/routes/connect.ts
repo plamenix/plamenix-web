@@ -12,6 +12,7 @@ const connectBody = z.object({
   password: z.string(),
   encryptionKey: z.string().optional(),
   fbclientPath: z.string().optional(),
+  charset: z.string().optional(),
   encryptionRequired: z.boolean().default(false),
   pureRust: z.boolean().default(false),
 });
@@ -37,6 +38,9 @@ export async function connectRoute(app: FastifyInstance): Promise<void> {
       }
       if (parsed.data.fbclientPath !== undefined) {
         config.fbclientPath = parsed.data.fbclientPath;
+      }
+      if (parsed.data.charset !== undefined && parsed.data.charset !== '') {
+        config.charset = parsed.data.charset;
       }
       if (parsed.data.pureRust) {
         config.pureRust = true;

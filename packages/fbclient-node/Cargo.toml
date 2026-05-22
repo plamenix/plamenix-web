@@ -21,7 +21,9 @@ serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 plamenix-types = { path = "../../../plamenix-core/crates/plamenix-types" }
 plamenix-db = { path = "../../../plamenix-core/crates/plamenix-db", default-features = false, features = ["pure-rust", "native"] }
+plamenix-tracing = { path = "../../../plamenix-core/crates/plamenix-tracing", features = ["otlp"] }
 serde_json = "1"
+tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [lints.rust]
@@ -44,3 +46,9 @@ trailing_empty_array = "allow"
 lto = true
 codegen-units = 1
 strip = "symbols"
+
+[patch.crates-io]
+# Same vendored rsfbclient-native patch used by the desktop edition.
+# Mirrors `plamenix-core/Cargo.toml` so the web edition decodes ARRAY
+# columns instead of erroring on type 540.
+rsfbclient-native = { path = "../../../plamenix-core/vendor/rsfbclient-native" }
