@@ -21,8 +21,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_plugin_host::{
-    ActivationOutcome, EpochTicker, HostState, InstanceRegistry, LogSink, Permission, PluginError,
-    PluginHost, SessionSlot, StagedPlugin, activate_into_registry, load,
+    ActivationOutcome, DispatchOutcome, EpochTicker, EventBus, HostState, InstanceRegistry,
+    LogSink, Permission, PluginError, PluginHost, SessionSlot, StagedPlugin, Supervisor,
+    activate_into_registry, dispatch_event_supervised, load,
 };
 use plamenix_tracing::TracingGuard;
 use semver::Version;
@@ -57,6 +58,18 @@ fn host() -> Result<&'static PluginHost> {
 /// `activate()` returned, so no plugin code could ever be called
 /// again — the per-session context plumbing had nothing to run
 /// against. Instances live here for the process lifetime instead.
+/// Topic subscriptions declared by plugin manifests.
+fn bus() -> &'static EventBus {
+    static BUS: OnceLock<EventBus> = OnceLock::new();
+    BUS.get_or_init(EventBus::new)
+}
+
+/// Crash budget and restart policy per plugin.
+fn supervisor() -> &'static Supervisor {
+    static SUPERVISOR: OnceLock<Supervisor> = OnceLock::new();
+    SUPERVISOR.get_or_init(Supervisor::new)
+}
+
 fn instances() -> &'static InstanceRegistry {
     static INSTANCES: OnceLock<InstanceRegistry> = OnceLock::new();
     INSTANCES.get_or_init(InstanceRegistry::new)
@@ -203,9 +216,36 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
     // Registers the live store rather than dropping it. A failed
     // activation is not registered — the activator drops that store
     // itself — so the registry only holds instances that can be called.
+    supervisor()
+        .register(
+            &staged_arc.manifest.plugin.id,
+            staged_arc.manifest.plugin.restart_policy,
+        )
+        .map_err(plugin_err_to_napi)?;
+
     let outcome = activate_into_registry(&host_ref, state, &staged_arc, instances())
         .await
         .map_err(plugin_err_to_napi)?;
+
+    // Recorded only on success: a plugin that failed to activate must
+    // not sit in the bus collecting events it has no instance to
+    // receive.
+    if matches!(outcome, ActivationOutcome::Ok) {
+        let plugin_id = &staged_arc.manifest.plugin.id;
+        supervisor()
+            .mark_active(plugin_id, std::time::Instant::now())
+            .map_err(plugin_err_to_napi)?;
+        for pattern in &staged_arc.manifest.contributions.event_subscriptions {
+            if let Err(err) = bus().subscribe(plugin_id, pattern) {
+                tracing::warn!(
+                    plugin = %plugin_id,
+                    pattern,
+                    %err,
+                    "ignoring an event subscription the bus rejected",
+                );
+            }
+        }
+    }
 
     let mut reg = registry().lock().expect("registry mutex");
     let entry = reg.get_mut(&plugin_id).ok_or_else(|| {
@@ -218,11 +258,53 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
     Ok(activated_view(entry))
 }
 
+/// Emits `topic` to every subscribed plugin, reporting failures to the
+/// supervisor.
+///
+/// The single entry point for host-originated events on this edition,
+/// mirroring the desktop shell's. Returns one entry per subscriber so
+/// the caller can see who was reached and what the supervisor made of
+/// any failure — a plugin trapping on an event must not fail the
+/// request that produced it.
+#[napi(js_name = "emitEvent")]
+pub async fn emit_event(topic: String, payload: String) -> Result<serde_json::Value> {
+    let deliveries =
+        dispatch_event_supervised(bus(), instances(), supervisor(), &topic, &payload).await;
+    let view: Vec<serde_json::Value> = deliveries
+        .into_iter()
+        .map(|d| {
+            let (status, detail) = match &d.outcome {
+                DispatchOutcome::Delivered => ("delivered", None),
+                DispatchOutcome::NotInstantiated => ("notInstantiated", None),
+                DispatchOutcome::Closed => ("closed", None),
+                DispatchOutcome::Failed(message) => ("failed", Some(message.clone())),
+            };
+            serde_json::json!({
+                "pluginId": d.plugin_id,
+                "status": status,
+                "detail": detail,
+                // Present only when the plugin failed; the supervisor
+                // does not weigh in on a successful delivery.
+                "disabled": matches!(
+                    d.decision,
+                    Some(plamenix_plugin_host::RestartDecision::Disable { .. })
+                ),
+            })
+        })
+        .collect();
+    serde_json::to_value(view).map_err(|err| Error::from_reason(err.to_string()))
+}
+
 /// Drops the plugin's registry entry, releasing the wasmtime Store and
 /// staged bundle. Subsequent `activatePlugin` calls require a fresh
 /// `loadPlugin` to re-stage.
 #[napi]
 pub async fn deactivate_plugin(plugin_id: String) -> Result<()> {
+    // Drop subscriptions before the instance: an event dispatched
+    // between the two would find a plugin the bus still lists and the
+    // registry no longer holds.
+    bus().unsubscribe_by_plugin(&plugin_id);
+
     // Drop the live instance first: removing it releases the wasmtime
     // Store, and with it the plugin's linear memory and tables. Doing
     // this after the staging entry went away would leave the instance

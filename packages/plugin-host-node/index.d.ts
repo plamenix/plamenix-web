@@ -22,6 +22,21 @@ export interface ActivatedPluginInfo {
  */
 export declare function activatePlugin(pluginId: string): Promise<ActivatedPluginInfo>
 
+/**
+ * Emits a topic to every subscribed plugin, reporting failures to the
+ * supervisor. Resolves with one entry per subscriber:
+ * `{ pluginId, status, detail, disabled }`.
+ *
+ * A plugin trapping on an event must not fail the request that
+ * produced it, so failures are reported rather than thrown.
+ */
+export declare function emitEvent(topic: string, payload: string): Promise<Array<{
+  pluginId: string
+  status: 'delivered' | 'notInstantiated' | 'closed' | 'failed'
+  detail: string | null
+  disabled: boolean
+}>>
+
 export interface ActivationInfo {
   status: string
   message?: string

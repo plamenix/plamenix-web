@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import * as fbclient from '@plamenix/fbclient-node';
+import * as pluginHost from '@plamenix/plugin-host-node';
 import { sessionStore } from '../sessions/store.js';
 import type { HistoryStore } from '../history/store.js';
 
@@ -48,6 +49,21 @@ export function executeRoute(history: HistoryStore) {
             historyLimit,
           );
         }
+        // Mirrors the desktop shell's first producer. Dispatch failures
+        // are reported by the host rather than thrown, so a plugin
+        // trapping on this event cannot fail the user's query.
+        try {
+          await pluginHost.emitEvent(
+            'db/query/executed',
+            JSON.stringify({
+              statements: Array.isArray(outcomes) ? outcomes.length : 0,
+              sessionId: parsed.data.sessionId,
+            }),
+          );
+        } catch (err) {
+          app.log.warn({ err }, 'failed to dispatch db/query/executed');
+        }
+
         return outcomes;
       } catch (err) {
         if (profileId) {
