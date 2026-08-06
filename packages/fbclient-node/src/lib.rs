@@ -102,6 +102,7 @@ pub struct ConnectionConfig {
     pub charset: Option<String>,
     pub encryption_required: bool,
     pub pure_rust: Option<bool>,
+    pub embedded: Option<bool>,
 }
 
 #[napi(object)]
@@ -139,6 +140,7 @@ pub async fn connect(config: ConnectionConfig) -> Result<ConnectionHandle> {
         fbclient_path: config.fbclient_path,
         charset: config.charset,
         encryption_required: config.encryption_required,
+        embedded: config.embedded.unwrap_or(false),
     };
 
     let session_id = driver()
@@ -408,6 +410,7 @@ pub async fn test_connection(config: ConnectionConfig) -> Result<serde_json::Val
         fbclient_path: config.fbclient_path,
         charset: config.charset,
         encryption_required: config.encryption_required,
+        embedded: config.embedded.unwrap_or(false),
     };
     let drv = driver();
     let started = Instant::now();

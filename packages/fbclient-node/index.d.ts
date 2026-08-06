@@ -22,6 +22,7 @@ export interface ConnectionConfig {
   charset?: string
   encryptionRequired: boolean
   pureRust?: boolean
+  embedded?: boolean
 }
 
 export interface ConnectionHandle {

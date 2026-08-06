@@ -422,6 +422,7 @@ export function App() {
         encryptionRequired: profile.encryptionRequired,
         fbclientPath: profile.fbclientPath ?? '',
         charset: profile.charset ?? 'UTF8',
+        embedded: profile.embedded ?? false,
       },
     });
   };
