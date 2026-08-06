@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_plugin_host::{
-    ActivationOutcome, HostState, InstanceRegistry, LogSink, Permission, PluginError, PluginHost,
-    SessionSlot, StagedPlugin, activate_into_registry, load,
+    ActivationOutcome, EpochTicker, HostState, InstanceRegistry, LogSink, Permission, PluginError,
+    PluginHost, SessionSlot, StagedPlugin, activate_into_registry, load,
 };
 use plamenix_tracing::TracingGuard;
 use semver::Version;
@@ -60,6 +60,27 @@ fn host() -> Result<&'static PluginHost> {
 fn instances() -> &'static InstanceRegistry {
     static INSTANCES: OnceLock<InstanceRegistry> = OnceLock::new();
     INSTANCES.get_or_init(InstanceRegistry::new)
+}
+
+/// Starts wasmtime's epoch ticker once, on first use.
+///
+/// Every plugin store is created with an epoch deadline, but a deadline
+/// is measured against a clock that something has to advance. Without
+/// this the deadlines were inert and a plugin that looped ran until the
+/// process died.
+///
+/// Called from async entry points only: `EpochTicker::spawn` needs a
+/// Tokio runtime, and napi-rs provides one to async exports.
+fn ensure_epoch_ticker(host: &PluginHost) {
+    static TICKER: OnceLock<EpochTicker> = OnceLock::new();
+    let mut started = false;
+    let _ = TICKER.get_or_init(|| {
+        started = true;
+        EpochTicker::spawn(host.engine().clone())
+    });
+    if started {
+        tracing::info!("epoch ticker started; plugin CPU deadlines are live");
+    }
 }
 
 fn registry() -> &'static Mutex<HashMap<String, ActivePluginEntry>> {
@@ -173,6 +194,7 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
     };
 
     let host_ref = host()?.clone();
+    ensure_epoch_ticker(&host_ref);
     let state = HostState::new(&staged_arc.manifest.plugin.id, HOST_VERSION)
         .with_edition(EDITION)
         .with_log_sink(Arc::clone(&log_sink_clone))
