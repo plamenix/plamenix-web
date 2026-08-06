@@ -87,8 +87,25 @@ export class PluginGrantStore {
     );
   }
 
-  /** Persist a grant. Idempotent — re-granting refreshes `grantedAt`. */
-  add(pluginId: string, permission: string): void {
+  /**
+   * Persist a grant. Idempotent — re-granting refreshes `grantedAt`.
+   *
+   * `declared` is the plugin manifest's required and optional
+   * capabilities. It is required rather than optional so the check
+   * cannot be forgotten: a grant is only meaningful for something the
+   * manifest asked for, and a capability the user was never shown
+   * cannot have been approved by them. The desktop edition enforces
+   * the same rule in `PluginsState::grant_declared`.
+   *
+   * @throws When `permission` is outside `declared`.
+   */
+  add(pluginId: string, permission: string, declared: readonly string[]): void {
+    if (!declared.includes(permission)) {
+      throw new Error(
+        `plugin \`${pluginId}\` does not declare \`${permission}\`; ` +
+          'a capability can only be granted when its manifest asks for it',
+      );
+    }
     this.insertStmt.run(pluginId, permission, Date.now());
   }
 

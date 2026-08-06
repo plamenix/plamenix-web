@@ -26,7 +26,7 @@ describe('PluginGrantStore', () => {
 
   it('persists grants idempotently and refreshes granted_at on re-grant', async () => {
     const store = new PluginGrantStore(dbPath);
-    store.add('dev.plamenix.hello', 'db.schema.list');
+    store.add('dev.plamenix.hello', 'db.schema.list', ['db.schema.list']);
     const first = store.list('dev.plamenix.hello');
     expect(first).toHaveLength(1);
     expect(first[0]?.permission).toBe('db.schema.list');
@@ -35,7 +35,7 @@ describe('PluginGrantStore', () => {
     // Ensure timestamp advances meaningfully before re-grant.
     await new Promise((r) => setTimeout(r, 5));
 
-    store.add('dev.plamenix.hello', 'db.schema.list');
+    store.add('dev.plamenix.hello', 'db.schema.list', ['db.schema.list']);
     const second = store.list('dev.plamenix.hello');
     expect(second).toHaveLength(1);
     expect(second[0]?.grantedAt ?? 0).toBeGreaterThanOrEqual(firstAt);
@@ -43,7 +43,7 @@ describe('PluginGrantStore', () => {
 
   it('removes grants without surfacing errors for absent rows', () => {
     const store = new PluginGrantStore(dbPath);
-    store.add('plg', 'db.schema.list');
+    store.add('plg', 'db.schema.list', ['db.schema.list']);
     store.remove('plg', 'db.schema.list');
     expect(store.list('plg')).toEqual([]);
     // No-op remove must not throw.
@@ -52,9 +52,9 @@ describe('PluginGrantStore', () => {
 
   it('groups all grants by plugin id for bulk replay', () => {
     const store = new PluginGrantStore(dbPath);
-    store.add('plg.one', 'db.schema.list');
-    store.add('plg.one', 'clipboard.read');
-    store.add('plg.two', 'net.https');
+    store.add('plg.one', 'db.schema.list', ['db.schema.list']);
+    store.add('plg.one', 'clipboard.read', ['clipboard.read']);
+    store.add('plg.two', 'net.https', ['net.https']);
 
     const all = store.listAll();
     expect(all.get('plg.one')).toEqual(
@@ -66,9 +66,9 @@ describe('PluginGrantStore', () => {
 
   it('purges every grant for one plugin without touching others', () => {
     const store = new PluginGrantStore(dbPath);
-    store.add('plg.keep', 'db.schema.list');
-    store.add('plg.purge', 'clipboard.read');
-    store.add('plg.purge', 'net.https');
+    store.add('plg.keep', 'db.schema.list', ['db.schema.list']);
+    store.add('plg.purge', 'clipboard.read', ['clipboard.read']);
+    store.add('plg.purge', 'net.https', ['net.https']);
 
     store.purgePlugin('plg.purge');
 
@@ -80,8 +80,8 @@ describe('PluginGrantStore', () => {
     // First "boot" — write some state.
     {
       const store = new PluginGrantStore(dbPath);
-      store.add('dev.plamenix.hello', 'db.schema.list');
-      store.add('dev.plamenix.hello', 'clipboard.read');
+      store.add('dev.plamenix.hello', 'db.schema.list', ['db.schema.list']);
+      store.add('dev.plamenix.hello', 'clipboard.read', ['clipboard.read']);
     }
 
     // Second "boot" — fresh class instance, same file. This is what
@@ -93,12 +93,27 @@ describe('PluginGrantStore', () => {
     expect(grants).toHaveLength(2);
   });
 
+  it('refuses a capability the manifest never declared', () => {
+    // The store validates scope, not grammar: a well-formed capability
+    // the plugin never asked for must not become a grant, because the
+    // user was never shown it to approve.
+    const store = new PluginGrantStore(dbPath);
+    expect(() => store.add('plg', 'db.write.any', ['db.read.any'])).toThrow(
+      /does not declare/,
+    );
+    expect(store.list('plg')).toHaveLength(0);
+  });
+
   it('rejects nothing about permission shape — grammar validation is the napi binding job', () => {
     // Documenting the boundary: this store treats permission strings
     // as opaque keys. Capability-grammar validation happens at the
     // route layer (via the napi binding's `grant_permission` which
     // calls `Permission::parse`) before any call into this store.
     const store = new PluginGrantStore(dbPath);
-    expect(() => store.add('plg', 'this.is.not.valid.but.store.does.not.know')).not.toThrow();
+    expect(() =>
+      store.add('plg', 'this.is.not.valid.but.store.does.not.know', [
+        'this.is.not.valid.but.store.does.not.know',
+      ]),
+    ).not.toThrow();
   });
 });

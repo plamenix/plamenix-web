@@ -243,12 +243,23 @@ export function pluginsRoute(options: PluginsRouteOptions) {
         });
       }
       try {
+        // A grant is only meaningful for a capability the manifest
+        // asked for, so the declared set comes from the host rather
+        // than being trusted from the request.
+        const target = (await pluginHost.listActive()).find(
+          (p) => p.id === idParsed.data.id,
+        );
+        if (!target) {
+          return reply.code(404).send({ error: 'unknown_plugin' });
+        }
+        const declared = [...target.requiredPermissions, ...target.optionalPermissions];
+
         // Persist first — if the napi push then fails, the next boot
         // replays the persisted grant and the operator sees consistent
         // state. The opposite ordering would risk losing a grant if
         // the server crashed between the napi push and the SQLite
         // commit.
-        grantStore.add(idParsed.data.id, bodyParsed.data.permission);
+        grantStore.add(idParsed.data.id, bodyParsed.data.permission, declared);
         await pluginHost.grantPermission(idParsed.data.id, bodyParsed.data.permission);
         const active = await pluginHost.listActive();
         return { plugins: active };

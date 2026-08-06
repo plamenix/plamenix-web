@@ -114,13 +114,16 @@ describe('plugin lifecycle routes', () => {
   });
 
   it('refuses lifecycle actions on an unknown plugin id', async () => {
+    // 404 rather than a generic failure: the route now looks the
+    // plugin up to read its declared capabilities, so "no such plugin"
+    // is distinguishable from "that grant was rejected".
     const res = await app.inject({
       method: 'POST',
       url: '/api/plugins/no.such.plugin/grant',
       payload: { permission: 'db.schema.list' },
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'grant_failed' });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: 'unknown_plugin' });
   });
 
   it('GET /api/plugins/:id/ui.mjs serves the bundle when present', async () => {
