@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_plugin_host::{
-    ActivationOutcome, HostState, LogSink, Permission, PluginError, PluginHost, SessionSlot,
-    StagedPlugin, activate_with_state, load,
+    ActivationOutcome, HostState, InstanceRegistry, LogSink, Permission, PluginError, PluginHost,
+    SessionSlot, StagedPlugin, activate_into_registry, load,
 };
 use plamenix_tracing::TracingGuard;
 use semver::Version;
@@ -50,6 +50,18 @@ fn host() -> Result<&'static PluginHost> {
 }
 
 /// Process-wide registry of active plugin entries, keyed by plugin id.
+/// Live wasmtime instances, keyed by plugin id.
+///
+/// Separate from the staging registry above, which holds bundles and
+/// metadata. Activation used to drop its `Store` as soon as
+/// `activate()` returned, so no plugin code could ever be called
+/// again — the per-session context plumbing had nothing to run
+/// against. Instances live here for the process lifetime instead.
+fn instances() -> &'static InstanceRegistry {
+    static INSTANCES: OnceLock<InstanceRegistry> = OnceLock::new();
+    INSTANCES.get_or_init(InstanceRegistry::new)
+}
+
 fn registry() -> &'static Mutex<HashMap<String, ActivePluginEntry>> {
     static REGISTRY: OnceLock<Mutex<HashMap<String, ActivePluginEntry>>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -166,7 +178,10 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
         .with_log_sink(Arc::clone(&log_sink_clone))
         .with_session_slot(Arc::clone(&session_slot_clone));
 
-    let outcome = activate_with_state(&host_ref, state, &staged_arc)
+    // Registers the live store rather than dropping it. A failed
+    // activation is not registered — the activator drops that store
+    // itself — so the registry only holds instances that can be called.
+    let outcome = activate_into_registry(&host_ref, state, &staged_arc, instances())
         .await
         .map_err(plugin_err_to_napi)?;
 
@@ -186,6 +201,12 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
 /// `loadPlugin` to re-stage.
 #[napi]
 pub async fn deactivate_plugin(plugin_id: String) -> Result<()> {
+    // Drop the live instance first: removing it releases the wasmtime
+    // Store, and with it the plugin's linear memory and tables. Doing
+    // this after the staging entry went away would leave the instance
+    // orphaned but still resident.
+    instances().remove(&plugin_id).map_err(plugin_err_to_napi)?;
+
     let mut reg = registry().lock().expect("registry mutex");
     if reg.remove(&plugin_id).is_none() {
         return Err(Error::from_reason(format!(
@@ -242,9 +263,9 @@ pub async fn grant_permission(plugin_id: String, permission: String) -> Result<(
     // garbage at the entry point catches typos.
     let _ = Permission::parse(&permission).map_err(plugin_err_to_napi)?;
     let mut reg = registry().lock().expect("registry mutex");
-    let entry = reg.get_mut(&plugin_id).ok_or_else(|| {
-        Error::from_reason(format!("plugin `{plugin_id}` not loaded"))
-    })?;
+    let entry = reg
+        .get_mut(&plugin_id)
+        .ok_or_else(|| Error::from_reason(format!("plugin `{plugin_id}` not loaded")))?;
     entry.granted.insert(permission);
     Ok(())
 }
@@ -254,9 +275,9 @@ pub async fn grant_permission(plugin_id: String, permission: String) -> Result<(
 #[napi]
 pub async fn revoke_permission(plugin_id: String, permission: String) -> Result<()> {
     let mut reg = registry().lock().expect("registry mutex");
-    let entry = reg.get_mut(&plugin_id).ok_or_else(|| {
-        Error::from_reason(format!("plugin `{plugin_id}` not loaded"))
-    })?;
+    let entry = reg
+        .get_mut(&plugin_id)
+        .ok_or_else(|| Error::from_reason(format!("plugin `{plugin_id}` not loaded")))?;
     entry.granted.remove(&permission);
     Ok(())
 }
