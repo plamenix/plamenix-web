@@ -28,3 +28,6 @@ Thumbs.db
 packages/server/plugin-grants.sqlite
 packages/server/plugin-grants.sqlite-shm
 packages/server/plugin-grants.sqlite-wal
+
+# NAPI build output
+packages/plugin-host-node/*.node
