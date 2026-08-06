@@ -82,6 +82,11 @@ import {
   type SchemaAction,
   type SchemaDdl,
   type TestConnectionResult,
+  TransactionBar,
+  hasUncommittedWork,
+  type TxConfig,
+  type TxMode,
+  type TxStatus,
 } from '@plamenix/ui';
 import {
   History,
@@ -298,27 +303,19 @@ export function App() {
     }
   }, [activeTab, activeTabId, patchTab]);
 
-  const deleteHistoryEntry = useCallback(
-    async (id: number) => {
-      await fetchTransport.invoke<{ removed: boolean }>('history-delete', { id });
-      setHistoryEntries((prev) => (prev ? prev.filter((e) => e.id !== id) : prev));
-    },
-    [],
-  );
+  const deleteHistoryEntry = useCallback(async (id: number) => {
+    await fetchTransport.invoke<{ removed: boolean }>('history-delete', { id });
+    setHistoryEntries((prev) => (prev ? prev.filter((e) => e.id !== id) : prev));
+  }, []);
 
-  const deleteHistoryEntries = useCallback(
-    async (ids: number[]) => {
-      if (ids.length === 0) return;
-      await fetchTransport.invoke<{ removed: number }>('history-delete-many', {
-        ids,
-      });
-      const drop = new Set(ids);
-      setHistoryEntries((prev) =>
-        prev ? prev.filter((e) => !drop.has(e.id)) : prev,
-      );
-    },
-    [],
-  );
+  const deleteHistoryEntries = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) return;
+    await fetchTransport.invoke<{ removed: number }>('history-delete-many', {
+      ids,
+    });
+    const drop = new Set(ids);
+    setHistoryEntries((prev) => (prev ? prev.filter((e) => !drop.has(e.id)) : prev));
+  }, []);
 
   const setHistoryLabel = useCallback(
     async (id: number, label: string | null) => {
@@ -326,8 +323,7 @@ export function App() {
         id,
         label,
       });
-      const normalized =
-        label && label.trim().length > 0 ? label.trim() : null;
+      const normalized = label && label.trim().length > 0 ? label.trim() : null;
       let matched: { sql: string; executedAt: number } | null = null;
       setHistoryEntries((prev) => {
         if (!prev) return prev;
@@ -529,6 +525,7 @@ export function App() {
       });
       renameTab(tabId, profile.name);
       void refreshCryptState(tabId, response.sessionId);
+      void refreshTxStatus(tabId, response.sessionId);
       void refreshSchema(tabId, response.sessionId);
       void refreshEngineVersion(tabId, response.sessionId);
     } catch (err) {
@@ -598,6 +595,7 @@ export function App() {
       });
       renameTab(tabId, tab.profileName.trim() || deriveTitle(tab.form));
       void refreshCryptState(tabId, response.sessionId);
+      void refreshTxStatus(tabId, response.sessionId);
       void refreshSchema(tabId, response.sessionId);
       void refreshEngineVersion(tabId, response.sessionId);
     } catch (err) {
@@ -706,8 +704,7 @@ export function App() {
         sessionId,
       });
       patchTab(tabId, {
-        engineVersion:
-          res.engineVersion.trim().length > 0 ? res.engineVersion.trim() : null,
+        engineVersion: res.engineVersion.trim().length > 0 ? res.engineVersion.trim() : null,
         lastPingAt: Date.now(),
       });
     } catch {
@@ -738,8 +735,7 @@ export function App() {
       patchTab(tabId, { error: editorDecision.reason });
       return;
     }
-    const sqlAfterEditor =
-      editorDecision.action === 'replace' ? editorDecision.ctx.sql : sqlAtSend;
+    const sqlAfterEditor = editorDecision.action === 'replace' ? editorDecision.ctx.sql : sqlAtSend;
     const queryDecision = await queryExecutingChain.run({
       tabId,
       sessionId: tab.sessionId,
@@ -749,8 +745,7 @@ export function App() {
       patchTab(tabId, { error: queryDecision.reason });
       return;
     }
-    const sql =
-      queryDecision.action === 'replace' ? queryDecision.ctx.sql : sqlAfterEditor;
+    const sql = queryDecision.action === 'replace' ? queryDecision.ctx.sql : sqlAfterEditor;
     const key = recentKeyOf(tab.form, tab.profileName);
     const startedAt = Date.now();
     patchTab(tabId, { error: null, busy: true });
@@ -764,6 +759,9 @@ export function App() {
       patchTab(tabId, { results: res, executedSql: sql, focusedObjectName: null });
       notifyMutations(res);
       recordExec(key, sql, startedAt, res, null);
+      // Manual mode opens the transaction on the first statement and
+      // counts each one after, so the indicator needs a refresh.
+      if (tab.sessionId) void refreshTxStatus(tabId, tab.sessionId);
     } catch (err) {
       patchTab(tabId, { error: String(err) });
       recordExec(key, sql, startedAt, null, String(err));
@@ -852,7 +850,7 @@ export function App() {
       const startedAt = Date.now();
       const scopeLabel =
         req.scope.kind === 'statement'
-          ? req.scope.label ?? req.scope.table?.name ?? req.scope.sql.slice(0, 80)
+          ? (req.scope.label ?? req.scope.table?.name ?? req.scope.sql.slice(0, 80))
           : req.scope.tables.map((t) => t.name).join(', ');
       const tables =
         req.scope.kind === 'statement'
@@ -899,10 +897,7 @@ export function App() {
         const blob = await response.blob();
         const disposition = response.headers.get('Content-Disposition') ?? '';
         const m = /filename="([^"]+)"/.exec(disposition);
-        const stamp = new Date()
-          .toISOString()
-          .replace(/[-:T]/g, '')
-          .slice(0, 15);
+        const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
         const suggestedFilename = m?.[1] ?? `plamenix-export-${stamp}.${req.format}`;
         emitExportCompleted({
           exportId,
@@ -955,23 +950,30 @@ export function App() {
     async ({ table, predicate }: { table: string; predicate: string | null }) => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table)
-        ? table
-        : `"${table.replace(/"/g, '""')}"`;
+      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table) ? table : `"${table.replace(/"/g, '""')}"`;
       const sql = predicate
         ? `SELECT COUNT(*) FROM ${quoted} WHERE ${predicate}`
         : `SELECT COUNT(*) FROM ${quoted}`;
-      const outcomes = await fetchTransport.invoke<StatementOutcome[]>(
-        'execute',
-        { sessionId: tab.sessionId, sql },
-      );
+      const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
+        sessionId: tab.sessionId,
+        sql,
+      });
       const first = outcomes[0];
       if (!first || first.status !== 'ok' || !('Rows' in first.result)) {
         throw new Error('COUNT(*) did not return a row.');
       }
       const cell = first.result.Rows.rows[0]?.cells[0];
       if (!cell) throw new Error('COUNT(*) returned an empty row.');
-      if (cell.type === 'integer') return cell.value;
+      if (cell.type === 'integer') {
+        // Integers cross the wire as exact decimal text so a BIGINT
+        // survives the JSON hop. A row count is bounded by what the UI
+        // can page through, so narrowing it here is safe.
+        const parsed = Number(cell.value);
+        if (!Number.isFinite(parsed)) {
+          throw new Error(`COUNT(*) returned an unparseable value: ${cell.value}.`);
+        }
+        return parsed;
+      }
       if (cell.type === 'float' && typeof cell.value === 'number') {
         return cell.value;
       }
@@ -984,9 +986,7 @@ export function App() {
     async ({ table, predicate }: { table: string; predicate: string | null }) => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table)
-        ? table
-        : `"${table.replace(/"/g, '""')}"`;
+      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table) ? table : `"${table.replace(/"/g, '""')}"`;
       const sql = predicate
         ? `SELECT * FROM ${quoted} WHERE ${predicate}`
         : `SELECT * FROM ${quoted}`;
@@ -1010,9 +1010,7 @@ export function App() {
       const tabId = activeTabId;
       const tab = activeTab;
       if (!tab.sessionId) return;
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(name)
-        ? name
-        : `"${name.replace(/"/g, '""')}"`;
+      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
       const sql = `SELECT * FROM ${quoted}`;
       const key = recentKeyOf(tab.form, tab.profileName);
       const startedAt = Date.now();
@@ -1160,10 +1158,77 @@ export function App() {
     }
   };
 
+  /// Pulls the session's transaction state into the tab, so the
+  /// indicator reflects the session rather than what the UI assumed.
+  const refreshTxStatus = useCallback(
+    async (tabId: string, sessionId: string) => {
+      try {
+        const status = await fetchTransport.invoke<TxStatus>('transaction/status', {
+          sessionId,
+        });
+        patchTab(tabId, { txStatus: status });
+      } catch {
+        // Not worth surfacing alone; the next real operation reports it.
+      }
+    },
+    [patchTab],
+  );
+
+  const handleSetTxMode = async (mode: TxMode, config: TxConfig) => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    if (!tab.sessionId) return;
+    patchTab(tabId, { busy: true });
+    try {
+      const status = await fetchTransport.invoke<TxStatus>('transaction/mode', {
+        sessionId: tab.sessionId,
+        mode,
+        config,
+      });
+      patchTab(tabId, { txStatus: status, error: null });
+    } catch (err) {
+      patchTab(tabId, { error: String(err) });
+    } finally {
+      patchTab(tabId, { busy: false });
+    }
+  };
+
+  const finishTx = async (which: 'commit' | 'rollback') => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    if (!tab.sessionId) return;
+    patchTab(tabId, { busy: true });
+    try {
+      const status = await fetchTransport.invoke<TxStatus>(`transaction/${which}`, {
+        sessionId: tab.sessionId,
+      });
+      patchTab(tabId, { txStatus: status, error: null });
+      // DDL is transactional in Firebird, so committing or discarding
+      // can change the schema.
+      void refreshSchema(tabId, tab.sessionId);
+    } catch (err) {
+      patchTab(tabId, { error: String(err) });
+    } finally {
+      patchTab(tabId, { busy: false });
+    }
+  };
+
+  /// Asks before throwing away uncommitted work. An open transaction
+  /// with nothing in it is not worth interrupting anyone over.
+  const confirmDiscardTx = (tab: TabState, what: string): boolean => {
+    if (!hasUncommittedWork(tab.txStatus)) return true;
+    const count = tab.txStatus?.pendingStatements ?? 0;
+    const statements = count === 1 ? '1 statement' : `${count} statements`;
+    return window.confirm(
+      `${what} will roll back ${statements} that have not been committed. Continue?`,
+    );
+  };
+
   const handleDisconnect = async () => {
     const tabId = activeTabId;
     const tab = activeTab;
     if (!tab.sessionId) return;
+    if (!confirmDiscardTx(tab, 'Disconnecting')) return;
     patchTab(tabId, { error: null, busy: true });
     try {
       await fetchTransport.invoke<{ closed: boolean }>('close', { sessionId: tab.sessionId });
@@ -1179,6 +1244,7 @@ export function App() {
         lastPingAt: null,
         connectedAt: null,
         engineVersion: null,
+        txStatus: null,
       });
     } catch (err) {
       patchTab(tabId, { error: String(err) });
@@ -1233,6 +1299,7 @@ export function App() {
 
   const handleTabClose = (id: string) => {
     const tab = tabs.find((t) => t.id === id);
+    if (tab && !confirmDiscardTx(tab, 'Closing this tab')) return;
     if (tab?.sessionId) {
       void fetchTransport
         .invoke<{ closed: boolean }>('close', { sessionId: tab.sessionId })
@@ -1252,24 +1319,21 @@ export function App() {
   const [statsFetchedAt, setStatsFetchedAt] = useState<number | null>(null);
   const [statsTick, setStatsTick] = useState(0);
 
-  const refreshStats = useCallback(
-    async (sessionId: string) => {
-      setStatsLoading(true);
-      setStatsError(null);
-      try {
-        const next = await fetchTransport.invoke<DatabaseStats>('database-stats', {
-          sessionId,
-        });
-        setStats(next);
-        setStatsFetchedAt(Date.now());
-      } catch (err) {
-        setStatsError(String(err));
-      } finally {
-        setStatsLoading(false);
-      }
-    },
-    [],
-  );
+  const refreshStats = useCallback(async (sessionId: string) => {
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      const next = await fetchTransport.invoke<DatabaseStats>('database-stats', {
+        sessionId,
+      });
+      setStats(next);
+      setStatsFetchedAt(Date.now());
+    } catch (err) {
+      setStatsError(String(err));
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
 
   const openStats = useCallback(() => {
     if (!activeTab.sessionId) return;
@@ -1330,8 +1394,7 @@ export function App() {
       openSearchPalette: () => handlersRef.current.setSearchOpen(true),
       openCommandPalette: () => handlersRef.current.setPaletteOpen(true),
       newTab: () => handlersRef.current.newTab(),
-      closeActiveTab: () =>
-        handlersRef.current.handleTabClose(handlersRef.current.activeTabId),
+      closeActiveTab: () => handlersRef.current.handleTabClose(handlersRef.current.activeTabId),
       canSaveProfile: () => {
         const t = handlersRef.current.activeTab;
         return t.sessionId === null && t.profileName.trim() !== '' && !t.busy;
@@ -1489,10 +1552,7 @@ export function App() {
         </div>
       </div>
       {showSettings && activeTab.sessionId === null ? (
-        <SettingsPage
-          onClose={() => setShowSettings(false)}
-          backLabel="Back to connections"
-        />
+        <SettingsPage onClose={() => setShowSettings(false)} backLabel="Back to connections" />
       ) : activeTab.sessionId === null ? (
         <ConnectView
           tab={activeTab}
@@ -1521,6 +1581,9 @@ export function App() {
           onBookmarksChange={(next) => patchTab(activeTabId, { bookmarks: next })}
           onExecute={handleExecute}
           onDisconnect={handleDisconnect}
+          onSetTxMode={(mode, config) => void handleSetTxMode(mode, config)}
+          onCommitTx={() => void finishTx('commit')}
+          onRollbackTx={() => void finishTx('rollback')}
           onOpenStats={openStats}
           onCommitCellEdit={handleCommitCellEdit}
           onCommitDdl={handleExecuteDdl}
@@ -1562,7 +1625,9 @@ export function App() {
         profileLabel={
           (activeTab.selectedProfileId
             ? profiles.find((p) => p.id === activeTab.selectedProfileId)?.name
-            : null) ?? activeTab.profileName ?? 'No profile'
+            : null) ??
+          activeTab.profileName ??
+          'No profile'
         }
         entries={historyEntries}
         loading={historyLoading}
@@ -1589,10 +1654,7 @@ export function App() {
         onClose={() => setPaletteOpen(false)}
         commands={commands}
       />
-      <ShortcutsCheatSheet
-        open={shortcutsOpen}
-        onClose={() => setShortcutsOpen(false)}
-      />
+      <ShortcutsCheatSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <SearchPalette
         open={searchOpen}
         schema={activeTab.schema}
@@ -1626,11 +1688,7 @@ export function App() {
           setActive(id);
         }}
       />
-      <ConfirmationModal
-        request={confirmHead}
-        onConfirm={onConfirmHead}
-        onCancel={onCancelHead}
-      />
+      <ConfirmationModal request={confirmHead} onConfirm={onConfirmHead} onCancel={onCancelHead} />
     </div>
   );
 }
@@ -1703,6 +1761,9 @@ interface SessionViewProps {
   onBookmarksChange: (next: Record<string, number>) => void;
   onExecute: () => void;
   onDisconnect: () => void;
+  onSetTxMode: (mode: TxMode, config: TxConfig) => void;
+  onCommitTx: () => void;
+  onRollbackTx: () => void;
   onRefreshSchema: () => void;
   onSchemaAction: (action: SchemaAction) => void;
   onPluginDdl: (ddl: SchemaDdl) => void;
@@ -1716,9 +1777,10 @@ interface SessionViewProps {
   onColumnWidthsChange: (next: Record<string, number>) => void;
   onFetchBlob: (blobId: string) => Promise<string>;
   onCountAllRows: (args: { table: string; predicate: string | null }) => Promise<number>;
-  onFetchScopedRows: (args: { table: string; predicate: string | null }) => Promise<
-    { cells: ColumnValue[] }[]
-  >;
+  onFetchScopedRows: (args: {
+    table: string;
+    predicate: string | null;
+  }) => Promise<{ cells: ColumnValue[] }[]>;
   onReconnect: () => void;
   onShowDdl: (kind: DdlSourceKind, name: string) => void;
   onBrowseTable: (name: string) => Promise<void>;
@@ -1734,6 +1796,9 @@ function SessionView({
   onBookmarksChange,
   onExecute,
   onDisconnect,
+  onSetTxMode,
+  onCommitTx,
+  onRollbackTx,
   onRefreshSchema,
   onSchemaAction,
   onPluginDdl,
@@ -1832,6 +1897,15 @@ function SessionView({
       ) : (
         <main className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
           <QueryPanel
+            transactionBar={
+              <TransactionBar
+                status={tab.txStatus}
+                busy={tab.busy}
+                onSetMode={onSetTxMode}
+                onCommit={onCommitTx}
+                onRollback={onRollbackTx}
+              />
+            }
             sessionId={tab.sessionId}
             sql={tab.sql}
             busy={tab.busy}
@@ -1847,9 +1921,7 @@ function SessionView({
             onBookmarksChange={onBookmarksChange}
             onOpenStats={onOpenStats}
             onReconnect={onReconnect}
-            onEditorFocus={() =>
-              emitEditorFocused({ tabId: tab.id, focusedAt: Date.now() })
-            }
+            onEditorFocus={() => emitEditorFocused({ tabId: tab.id, focusedAt: Date.now() })}
             onEditorSelectionChange={(sel) =>
               emitEditorSelectionChanged({
                 tabId: tab.id,
@@ -1866,7 +1938,7 @@ function SessionView({
           {(() => {
             const focusedTable =
               tab.focusedObjectName && tab.schema
-                ? tab.schema.tables.find((t) => t.name === tab.focusedObjectName) ?? null
+                ? (tab.schema.tables.find((t) => t.name === tab.focusedObjectName) ?? null)
                 : null;
             if (focusedTable && tab.results && tab.results.length > 0) {
               return (
