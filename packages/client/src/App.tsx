@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CommandPalette,
+  ConfirmationModal,
   ConnectionScreen,
   DdlViewerModal,
   ErrorBanner,
@@ -28,8 +29,32 @@ import {
   resolveHistoryLimit,
   ShortcutsCheatSheet,
   getModKeyLabel,
-  isTypingTarget,
+  registerBuiltinDefaultKeybindings,
+  connectionOpeningChain,
+  editorSavingChain,
+  installDestructiveDropInterceptor,
+  setConfirmationProvider,
+  type ConfirmationRequest,
+  type PendingConfirmation,
+  emitExportCompleted,
+  emitExportFailed,
+  emitExportStarted,
+  emitSchemaActionApplied,
+  emitEditorFocused,
+  emitEditorSelectionChanged,
+  exportStartingChain,
+  newExportId,
+  queryExecutingChain,
+  schemaActionApplyingChain,
+  useGlobalKeybindings,
   useConnectionPrefs,
+  useEmitConnectionEvents,
+  useEmitEditorEvents,
+  useEmitLifecycleEvents,
+  useEmitQueryEvents,
+  useEmitSchemaEvents,
+  useEmitSettingsThemeEvents,
+  useEmitTabEvents,
   useResolvedThemeMode,
   useHealthProbe,
   useRecentQueries,
@@ -55,6 +80,7 @@ import {
   type StatementOutcome,
   type TabState,
   type SchemaAction,
+  type SchemaDdl,
   type TestConnectionResult,
 } from '@plamenix/ui';
 import {
@@ -161,7 +187,60 @@ function formatRelative(at: number, _tick: number): string {
   return `${hours}h ago`;
 }
 
+// I6 event-bus identity. Keep in sync with package.json version on
+// release-prep (no live import yet — vite JSON imports work but
+// require the workspace to expose package.json to the bundler).
+const HOST_VERSION = '1.0.0-beta.0';
+const EDITION = 'web' as const;
+
 export function App() {
+  // I6.3-I6.6 + I6.8 + I6.10 + I6.11 — mount the seven event-bridge
+  // hooks once at the App root. Each hook subscribes to its source
+  // store + diffs/emits on every relevant transition. Order is
+  // arbitrary; hooks are independent.
+  useEmitLifecycleEvents({ edition: EDITION, hostVersion: HOST_VERSION });
+  useEmitTabEvents();
+  useEmitConnectionEvents();
+  useEmitQueryEvents();
+  useEmitSchemaEvents();
+  useEmitSettingsThemeEvents();
+  useEmitEditorEvents();
+
+  // I6.12 — confirmation queue + provider + built-in destructive-DROP
+  // interceptor. The queue keeps multiple in-flight confirmations
+  // ordered; each user action resolves exactly one request.
+  const [confirmQueue, setConfirmQueue] = useState<
+    Array<PendingConfirmation & { resolve: (v: boolean) => void }>
+  >([]);
+  useEffect(() => {
+    setConfirmationProvider(
+      (req: ConfirmationRequest) =>
+        new Promise<boolean>((resolve) => {
+          setConfirmQueue((q) => [...q, { ...req, resolve }]);
+        }),
+    );
+    const dropReg = installDestructiveDropInterceptor();
+    return () => {
+      setConfirmationProvider(null);
+      dropReg.dispose();
+    };
+  }, []);
+  const confirmHead = confirmQueue[0] ?? null;
+  const onConfirmHead = useCallback(() => {
+    setConfirmQueue((q) => {
+      const [head, ...rest] = q;
+      head?.resolve(true);
+      return rest;
+    });
+  }, []);
+  const onCancelHead = useCallback(() => {
+    setConfirmQueue((q) => {
+      const [head, ...rest] = q;
+      head?.resolve(false);
+      return rest;
+    });
+  }, []);
+
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const newTab = useTabsStore((s) => s.newTab);
@@ -461,6 +540,21 @@ export function App() {
   const handleConnect = async () => {
     const tabId = activeTabId;
     const tab = activeTab;
+    const decision = await connectionOpeningChain.run({
+      tabId,
+      profileId: tab.selectedProfileId,
+      host: tab.form.host,
+      port: tab.form.port,
+      database: tab.form.database,
+      user: tab.form.user,
+      pureRust: tab.form.pureRust,
+      encryptionRequired: tab.form.encryptionRequired,
+      charset: tab.form.charset,
+    });
+    if (decision.action === 'cancel') {
+      patchTab(tabId, { error: decision.reason });
+      return;
+    }
     patchTab(tabId, { error: null, busy: true, cryptState: null });
     try {
       let response: ConnectResponse;
@@ -634,22 +728,44 @@ export function App() {
     const tab = activeTab;
     if (!tab.sessionId) return;
     const sqlAtSend = tab.sql;
+    const editorDecision = await editorSavingChain.run({
+      tabId,
+      sessionId: tab.sessionId,
+      sql: sqlAtSend,
+    });
+    if (editorDecision.action === 'cancel') {
+      patchTab(tabId, { error: editorDecision.reason });
+      return;
+    }
+    const sqlAfterEditor =
+      editorDecision.action === 'replace' ? editorDecision.ctx.sql : sqlAtSend;
+    const queryDecision = await queryExecutingChain.run({
+      tabId,
+      sessionId: tab.sessionId,
+      sql: sqlAfterEditor,
+    });
+    if (queryDecision.action === 'cancel') {
+      patchTab(tabId, { error: queryDecision.reason });
+      return;
+    }
+    const sql =
+      queryDecision.action === 'replace' ? queryDecision.ctx.sql : sqlAfterEditor;
     const key = recentKeyOf(tab.form, tab.profileName);
     const startedAt = Date.now();
     patchTab(tabId, { error: null, busy: true });
     try {
       const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
         sessionId: tab.sessionId,
-        sql: sqlAtSend,
+        sql,
         profileId: tab.selectedProfileId ?? undefined,
         historyLimit: currentHistoryLimit(),
       });
-      patchTab(tabId, { results: res, executedSql: sqlAtSend, focusedObjectName: null });
+      patchTab(tabId, { results: res, executedSql: sql, focusedObjectName: null });
       notifyMutations(res);
-      recordExec(key, sqlAtSend, startedAt, res, null);
+      recordExec(key, sql, startedAt, res, null);
     } catch (err) {
       patchTab(tabId, { error: String(err) });
-      recordExec(key, sqlAtSend, startedAt, null, String(err));
+      recordExec(key, sql, startedAt, null, String(err));
     } finally {
       patchTab(tabId, { busy: false });
     }
@@ -731,32 +847,81 @@ export function App() {
 
   const handleStreamedExport: StreamedExportRunner = useCallback(
     async (req: StreamedExportRequest): Promise<StreamedExportResult> => {
-      const response = await fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: req.sessionId,
-          format: req.format,
-          csvDelimiter: req.csvDelimiter,
-          scope: req.scope,
-          includeDdl: req.includeDdl ?? true,
-        }),
+      const exportId = newExportId();
+      const startedAt = Date.now();
+      const scopeLabel =
+        req.scope.kind === 'statement'
+          ? req.scope.label ?? req.scope.table?.name ?? req.scope.sql.slice(0, 80)
+          : req.scope.tables.map((t) => t.name).join(', ');
+      const tables =
+        req.scope.kind === 'statement'
+          ? req.scope.table
+            ? [req.scope.table.name]
+            : []
+          : req.scope.tables.map((t) => t.name);
+      const exportDecision = await exportStartingChain.run({
+        tabId: activeTab.id,
+        sessionId: req.sessionId,
+        format: req.format,
+        scopeKind: req.scope.kind,
+        scopeLabel,
+        tables,
       });
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `export HTTP ${response.status}`);
+      if (exportDecision.action === 'cancel') {
+        throw new Error(exportDecision.reason);
       }
-      const blob = await response.blob();
-      const disposition = response.headers.get('Content-Disposition') ?? '';
-      const m = /filename="([^"]+)"/.exec(disposition);
-      const stamp = new Date()
-        .toISOString()
-        .replace(/[-:T]/g, '')
-        .slice(0, 15);
-      const suggestedFilename = m?.[1] ?? `plamenix-export-${stamp}.${req.format}`;
-      return { blob, suggestedFilename };
+      emitExportStarted({
+        exportId,
+        tabId: activeTab.id,
+        sessionId: req.sessionId,
+        format: req.format,
+        scopeKind: req.scope.kind,
+        scopeLabel,
+        startedAt,
+      });
+      try {
+        const response = await fetch('/api/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: req.sessionId,
+            format: req.format,
+            csvDelimiter: req.csvDelimiter,
+            scope: req.scope,
+            includeDdl: req.includeDdl ?? true,
+          }),
+        });
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          throw new Error(text || `export HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        const disposition = response.headers.get('Content-Disposition') ?? '';
+        const m = /filename="([^"]+)"/.exec(disposition);
+        const stamp = new Date()
+          .toISOString()
+          .replace(/[-:T]/g, '')
+          .slice(0, 15);
+        const suggestedFilename = m?.[1] ?? `plamenix-export-${stamp}.${req.format}`;
+        emitExportCompleted({
+          exportId,
+          durationMs: Date.now() - startedAt,
+          byteSize: blob.size,
+          rowCount: null,
+          completedAt: Date.now(),
+        });
+        return { blob, suggestedFilename };
+      } catch (err) {
+        emitExportFailed({
+          exportId,
+          durationMs: Date.now() - startedAt,
+          error: err instanceof Error ? err.message : String(err),
+          failedAt: Date.now(),
+        });
+        throw err;
+      }
     },
-    [],
+    [activeTab.id],
   );
 
   const handleFetchTableExport = useCallback(
@@ -900,15 +1065,20 @@ export function App() {
     [activeTab, activeTabId, patchTab],
   );
 
-  const handleSchemaAction = async (action: SchemaAction) => {
+  /** I5.5 — dispatch a fully-resolved `SchemaDdl` through the same
+   *  autoExecute / insert-into-editor / confirm-then-run pipeline the
+   *  built-in `SchemaAction` handler uses. Plugin schema_actions go
+   *  through this directly; built-in actions go through
+   *  `handleSchemaAction` → `schemaDdl(action)` → here. */
+  const dispatchDdl = async (ddl: SchemaDdl): Promise<boolean> => {
     const tabId = activeTabId;
     const tab = activeTab;
-    const ddl = schemaDdl(action);
     if (ddl.autoExecute) {
-      if (!tab.sessionId) return;
+      if (!tab.sessionId) return false;
       const key = recentKeyOf(tab.form, tab.profileName);
       const startedAt = Date.now();
       patchTab(tabId, { error: null, busy: true });
+      let executed = false;
       try {
         const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
@@ -919,23 +1089,25 @@ export function App() {
         notifyMutations(res);
         recordExec(key, ddl.sql, startedAt, res, null);
         void refreshSchema(tabId, tab.sessionId);
+        executed = true;
       } catch (err) {
         patchTab(tabId, { error: String(err) });
         recordExec(key, ddl.sql, startedAt, null, String(err));
       } finally {
         patchTab(tabId, { busy: false });
       }
-      return;
+      return executed;
     }
     if (!ddl.destructive) {
       patchTab(tabId, { sql: ddl.sql });
-      return;
+      return false;
     }
-    if (!window.confirm(ddl.confirmPrompt ?? 'Run destructive statement?')) return;
-    if (!tab.sessionId) return;
+    if (!window.confirm(ddl.confirmPrompt ?? 'Run destructive statement?')) return false;
+    if (!tab.sessionId) return false;
     const key = recentKeyOf(tab.form, tab.profileName);
     const startedAt = Date.now();
     patchTab(tabId, { error: null, busy: true, sql: ddl.sql });
+    let executed = false;
     try {
       const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
         sessionId: tab.sessionId,
@@ -947,11 +1119,43 @@ export function App() {
       notifyMutations(res);
       recordExec(key, ddl.sql, startedAt, res, null);
       void refreshSchema(tabId, tab.sessionId);
+      executed = true;
     } catch (err) {
       patchTab(tabId, { error: String(err) });
       recordExec(key, ddl.sql, startedAt, null, String(err));
     } finally {
       patchTab(tabId, { busy: false });
+    }
+    return executed;
+  };
+
+  const handleSchemaAction = async (action: SchemaAction) => {
+    const ddl = schemaDdl(action);
+    if (activeTab.sessionId !== null) {
+      const decision = await schemaActionApplyingChain.run({
+        tabId: activeTabId,
+        sessionId: activeTab.sessionId,
+        kind: action.kind,
+        action: action.action,
+        targetName: action.target.name,
+        ddl: ddl.sql,
+      });
+      if (decision.action === 'cancel') {
+        patchTab(activeTabId, { error: decision.reason });
+        return;
+      }
+    }
+    const executed = await dispatchDdl(ddl);
+    if (executed) {
+      emitSchemaActionApplied({
+        tabId: activeTabId,
+        sessionId: activeTab.sessionId,
+        kind: action.kind,
+        action: action.action,
+        targetName: action.target.name,
+        ddl: ddl.sql,
+        appliedAt: Date.now(),
+      });
     }
   };
 
@@ -1112,52 +1316,27 @@ export function App() {
     setShortcutsOpen,
   };
 
+  // I5.1 — keybindings now live in the registry. The dispatcher
+  // hook walks `keybindings` contributions in priority order on
+  // every keydown; the built-in `@plamenix-builtin/default-keybindings`
+  // registration below carries the six shell defaults that used to
+  // live in a 40-line inline switch here. Third-party plugins can
+  // override individual combos by registering at lower priority.
+  useGlobalKeybindings();
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const h = handlersRef.current;
-      // `?` opens the cheat sheet only when the user isn't typing —
-      // question marks inside SQL or text inputs must reach the
-      // editor / form, not the modal.
-      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (isTypingTarget(e.target)) return;
-        e.preventDefault();
-        h.setShortcutsOpen(true);
-        return;
-      }
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const key = e.key.toLowerCase();
-      if (e.shiftKey && key === 'f') {
-        e.preventDefault();
-        h.setSearchOpen(true);
-        return;
-      }
-      switch (key) {
-        case 'k':
-          e.preventDefault();
-          h.setPaletteOpen(true);
-          break;
-        case 't':
-          e.preventDefault();
-          h.newTab();
-          break;
-        case 'w':
-          e.preventDefault();
-          h.handleTabClose(h.activeTabId);
-          break;
-        case 's':
-          if (
-            h.activeTab.sessionId === null &&
-            h.activeTab.profileName.trim() !== '' &&
-            !h.activeTab.busy
-          ) {
-            e.preventDefault();
-            void h.handleSaveProfile();
-          }
-          break;
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return registerBuiltinDefaultKeybindings({
+      openCheatSheet: () => handlersRef.current.setShortcutsOpen(true),
+      openSearchPalette: () => handlersRef.current.setSearchOpen(true),
+      openCommandPalette: () => handlersRef.current.setPaletteOpen(true),
+      newTab: () => handlersRef.current.newTab(),
+      closeActiveTab: () =>
+        handlersRef.current.handleTabClose(handlersRef.current.activeTabId),
+      canSaveProfile: () => {
+        const t = handlersRef.current.activeTab;
+        return t.sessionId === null && t.profileName.trim() !== '' && !t.busy;
+      },
+      saveActiveProfile: () => void handlersRef.current.handleSaveProfile(),
+    });
   }, []);
 
   const mod = getModKeyLabel();
@@ -1358,6 +1537,7 @@ export function App() {
             }
           }}
           onSchemaAction={handleSchemaAction}
+          onPluginDdl={dispatchDdl}
           onClearError={() => patchTab(activeTabId, { error: null })}
           onShowDdl={handleShowDdl}
           onBrowseTable={handleBrowseTable}
@@ -1445,6 +1625,11 @@ export function App() {
           setActive(id);
         }}
       />
+      <ConfirmationModal
+        request={confirmHead}
+        onConfirm={onConfirmHead}
+        onCancel={onCancelHead}
+      />
     </div>
   );
 }
@@ -1519,6 +1704,7 @@ interface SessionViewProps {
   onDisconnect: () => void;
   onRefreshSchema: () => void;
   onSchemaAction: (action: SchemaAction) => void;
+  onPluginDdl: (ddl: SchemaDdl) => void;
   onClearError: () => void;
   onOpenStats: () => void;
   onCommitCellEdit: (sql: string) => Promise<void>;
@@ -1549,6 +1735,7 @@ function SessionView({
   onDisconnect,
   onRefreshSchema,
   onSchemaAction,
+  onPluginDdl,
   onClearError,
   onOpenStats,
   onCommitCellEdit,
@@ -1617,6 +1804,7 @@ function SessionView({
                 }
               }}
               onAction={onSchemaAction}
+              onPluginDdl={onPluginDdl}
               onNewTable={() => setSchemaEditorOpen(true)}
               onPickObjectList={(kind) => setObjectListKind(kind)}
               onNewObject={(kind) => setNewObjectKind(kind)}
@@ -1658,6 +1846,18 @@ function SessionView({
             onBookmarksChange={onBookmarksChange}
             onOpenStats={onOpenStats}
             onReconnect={onReconnect}
+            onEditorFocus={() =>
+              emitEditorFocused({ tabId: tab.id, focusedAt: Date.now() })
+            }
+            onEditorSelectionChange={(sel) =>
+              emitEditorSelectionChanged({
+                tabId: tab.id,
+                anchor: sel.anchor,
+                head: sel.head,
+                length: sel.head - sel.anchor,
+                changedAt: Date.now(),
+              })
+            }
           />
 
           {tab.error && <ErrorBanner error={tab.error} onDismiss={onClearError} />}
@@ -1670,6 +1870,7 @@ function SessionView({
             if (focusedTable && tab.results && tab.results.length > 0) {
               return (
                 <TableObjectView
+                  tabId={tab.id}
                   table={focusedTable}
                   results={tab.results}
                   schema={tab.schema}
@@ -1689,6 +1890,8 @@ function SessionView({
             if (tab.results && tab.results.length > 0) {
               return (
                 <MultiResultView
+                  tabId={tab.id}
+                  sessionId={tab.sessionId}
                   outcomes={tab.results}
                   schema={tab.schema}
                   onCommitCellEdit={onCommitCellEdit}

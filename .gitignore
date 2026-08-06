@@ -23,3 +23,8 @@ packages/fbclient-node/npm/
 
 # OS
 Thumbs.db
+
+# Plugin grant store (runtime artifact)
+packages/server/plugin-grants.sqlite
+packages/server/plugin-grants.sqlite-shm
+packages/server/plugin-grants.sqlite-wal

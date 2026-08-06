@@ -1,0 +1,45 @@
+{
+  "name": "@plamenix/plugin-host-node",
+  "version": "1.0.0-beta.0",
+  "description": "NAPI bindings to plamenix-plugin-host — Plamenix web edition plugin runtime.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "type": "commonjs",
+  "license": "(MIT OR Apache-2.0)",
+  "author": "Zlatan Omerović <zlomerovic@hotmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zlatan/plamenix-web.git",
+    "directory": "packages/plugin-host-node"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "napi": {
+    "binaryName": "plamenix-plugin-host",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "node --test test/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "dev": "napi build --platform"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0",
+    "typescript": "^6.0.3"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ]
+}
