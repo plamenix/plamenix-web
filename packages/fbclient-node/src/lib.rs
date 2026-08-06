@@ -17,7 +17,7 @@ use napi_derive::napi;
 use plamenix_db::{
     ColumnValue, ConnectMode, ConnectionConfig as DbConnectionConfig, CryptState, DbDriver,
     QueryResult, RsfbDriver, SessionId as DbSessionId, StatementOutcome, inject_row_limit,
-    is_select_like, split_statements,
+    accepts_row_limit, split_statements,
 };
 use plamenix_db::export::{
     format_csv as fmt_csv, format_json as fmt_json, format_sql as fmt_sql, format_xml as fmt_xml,
@@ -257,7 +257,9 @@ pub async fn execute_batch(session_id: String, sql: String) -> Result<serde_json
     let mut outcomes: Vec<StatementOutcome> = Vec::with_capacity(stmts.len());
     for stmt in stmts {
         let started = Instant::now();
-        let exec_sql = if is_select_like(&stmt) {
+        // See the desktop shell: ROWS is SELECT-only grammar, so an
+        // EXECUTE statement must go through untouched.
+        let exec_sql = if accepts_row_limit(&stmt) {
             inject_row_limit(&stmt, ROW_LIMIT)
         } else {
             stmt.clone()
