@@ -9,6 +9,7 @@ import { exportRoute } from './routes/export.js';
 import { historyRoute } from './routes/history.js';
 import { profilesRoute } from './routes/profiles.js';
 import { pluginsRoute } from './routes/plugins.js';
+import { transactionRoute } from './routes/transaction.js';
 import { HistoryStore } from './history/store.js';
 import { ProfileStore } from './profiles/store.js';
 import { bootstrapPlugins } from './plugins/host.js';
@@ -44,6 +45,7 @@ export async function buildApp(env: Env) {
   await app.register(connectRoute);
   await app.register(executeRoute(historyStore));
   await app.register(exportRoute);
+  await app.register(transactionRoute);
   await app.register(profilesRoute(profileStore));
   await app.register(historyRoute(historyStore));
   await app.register(

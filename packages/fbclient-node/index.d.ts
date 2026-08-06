@@ -2,6 +2,25 @@
 /* eslint-disable */
 export declare function close(sessionId: string): Promise<void>
 
+/**
+ * Switches a session between autocommit and manual commit. Omit
+ * `config` to keep the session's current transaction settings.
+ * Rejects while a transaction is open.
+ */
+export declare function setTransactionMode(sessionId: string, mode: unknown, config?: unknown): Promise<any>
+
+/** Opens an explicit transaction. Manual mode opens one on the first statement. */
+export declare function beginTransaction(sessionId: string): Promise<any>
+
+/** Commits the open transaction. */
+export declare function commitTransaction(sessionId: string): Promise<any>
+
+/** Rolls back the open transaction, discarding every statement since it opened. */
+export declare function rollbackTransaction(sessionId: string): Promise<any>
+
+/** Current transaction state; answered without touching the engine. */
+export declare function transactionStatus(sessionId: string): Promise<any>
+
 export declare function connect(config: ConnectionConfig): Promise<ConnectionHandle>
 
 /**

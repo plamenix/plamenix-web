@@ -16,8 +16,8 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_db::{
     ColumnValue, ConnectMode, ConnectionConfig as DbConnectionConfig, CryptState, DbDriver,
-    QueryResult, RsfbDriver, SessionId as DbSessionId, StatementOutcome, inject_row_limit,
-    accepts_row_limit, split_statements,
+    QueryResult, RsfbDriver, SessionId as DbSessionId, StatementOutcome, TxConfig, TxMode,
+    accepts_row_limit, inject_row_limit, split_statements,
 };
 use plamenix_db::export::{
     format_csv as fmt_csv, format_json as fmt_json, format_sql as fmt_sql, format_xml as fmt_xml,
@@ -182,6 +182,86 @@ pub async fn close(session_id: String) -> Result<()> {
         .close(session)
         .await
         .map_err(|err| Error::from_reason(err.to_string()))
+}
+
+/// Switches a session between autocommit and manual commit.
+///
+/// `config` is the JSON form of `TxConfig`; omit it to keep the
+/// session's current settings. Refused while a transaction is open, so
+/// a mode change cannot silently commit or discard outstanding work.
+#[napi(js_name = "setTransactionMode")]
+pub async fn set_transaction_mode(
+    session_id: String,
+    mode: serde_json::Value,
+    config: Option<serde_json::Value>,
+) -> Result<serde_json::Value> {
+    let session = parse_session(&session_id)?;
+    let mode: TxMode =
+        serde_json::from_value(mode).map_err(|err| Error::from_reason(err.to_string()))?;
+    let config: TxConfig = match config {
+        Some(value) => {
+            serde_json::from_value(value).map_err(|err| Error::from_reason(err.to_string()))?
+        }
+        None => {
+            driver()
+                .transaction_status(session)
+                .await
+                .map_err(|err| Error::from_reason(err.to_string()))?
+                .config
+        }
+    };
+    let status = driver()
+        .set_transaction_mode(session, mode, config)
+        .await
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    serde_json::to_value(status).map_err(|err| Error::from_reason(err.to_string()))
+}
+
+/// Opens an explicit transaction. Manual mode opens one on the first
+/// statement, so this is only for starting one deliberately.
+#[napi(js_name = "beginTransaction")]
+pub async fn begin_transaction(session_id: String) -> Result<serde_json::Value> {
+    let session = parse_session(&session_id)?;
+    let status = driver()
+        .begin_transaction(session)
+        .await
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    serde_json::to_value(status).map_err(|err| Error::from_reason(err.to_string()))
+}
+
+/// Commits the open transaction.
+#[napi(js_name = "commitTransaction")]
+pub async fn commit_transaction(session_id: String) -> Result<serde_json::Value> {
+    let session = parse_session(&session_id)?;
+    let status = driver()
+        .commit(session)
+        .await
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    serde_json::to_value(status).map_err(|err| Error::from_reason(err.to_string()))
+}
+
+/// Rolls back the open transaction, discarding every statement since it
+/// opened — DDL included.
+#[napi(js_name = "rollbackTransaction")]
+pub async fn rollback_transaction(session_id: String) -> Result<serde_json::Value> {
+    let session = parse_session(&session_id)?;
+    let status = driver()
+        .rollback(session)
+        .await
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    serde_json::to_value(status).map_err(|err| Error::from_reason(err.to_string()))
+}
+
+/// Current transaction state. Answered from driver state without
+/// touching the engine, so it is safe to poll for the age readout.
+#[napi(js_name = "transactionStatus")]
+pub async fn transaction_status(session_id: String) -> Result<serde_json::Value> {
+    let session = parse_session(&session_id)?;
+    let status = driver()
+        .transaction_status(session)
+        .await
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    serde_json::to_value(status).map_err(|err| Error::from_reason(err.to_string()))
 }
 
 #[napi]
