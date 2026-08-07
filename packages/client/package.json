@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "license": "(MIT OR Apache-2.0)",
-  "author": "Zlatan Omerović <zlomerovic@hotmail.com>",
+  "author": "Zlatan Omerovi\u0107 <zlomerovic@hotmail.com>",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -27,6 +27,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
     "autoprefixer": "^10.5.0",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
