@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as pluginHost from '@plamenix/plugin-host-node';
+import * as pluginHost from '@plamenix/native';
 import type { PluginGrantStore } from '../plugins/grants.js';
 import { assertSafePluginId } from '../plugins/storage.js';
 

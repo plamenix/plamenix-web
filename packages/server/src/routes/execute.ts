@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as fbclient from '@plamenix/fbclient-node';
-import * as pluginHost from '@plamenix/plugin-host-node';
+import * as fbclient from '@plamenix/native';
+import * as pluginHost from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
 import type { HistoryStore } from '../history/store.js';
 

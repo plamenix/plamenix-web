@@ -1,4 +1,3 @@
-#![deny(clippy::all)]
 //! NAPI bindings to `plamenix-db`.
 //!
 //! Exposes the [`DbDriver`] trait surface (connect, execute, ping, close)
@@ -9,30 +8,24 @@
 //! napi-rs at module load time.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use plamenix_db::export::{
+    CsvDelimiter, ExportPart, format_csv as fmt_csv, format_json as fmt_json,
+    format_sql as fmt_sql, format_xml as fmt_xml,
+};
 use plamenix_db::{
     ColumnValue, ConnectMode, ConnectionConfig as DbConnectionConfig, CryptState, DbDriver,
     QueryResult, RsfbDriver, SessionId as DbSessionId, StatementOutcome, TxConfig, TxMode,
     accepts_row_limit, inject_row_limit, split_statements,
 };
-use plamenix_db::export::{
-    format_csv as fmt_csv, format_json as fmt_json, format_sql as fmt_sql, format_xml as fmt_xml,
-    CsvDelimiter, ExportPart,
-};
 use plamenix_types::TableInfo;
-use plamenix_tracing::TracingGuard;
 use plamenix_types::{
     DatabaseAlias as DbAlias, ListAliasesResult as ListAliases, TestConnectionResult as TestResult,
 };
-
-/// Holds the global tracing guard for the lifetime of the Node module.
-/// Wrapping in `Mutex<Option<_>>` lets us initialise lazily on the first
-/// `initTracing()` call and survive subsequent no-op calls.
-static TRACING_GUARD: OnceLock<Mutex<Option<TracingGuard>>> = OnceLock::new();
 
 /// Hard cap on rows surfaced per SELECT statement. Mirrors the desktop
 /// edition's behaviour; the web shell may relax it later for power users.
@@ -43,48 +36,18 @@ const ROW_LIMIT: u32 = 10_000;
 /// module does not panic on simple `import` if rsfbclient initialisation
 /// fails on some exotic platform; instead the first call surfaces the
 /// error.
-fn driver() -> RsfbDriver {
+/// The one driver this process has.
+///
+/// Public rather than private because `services` needs it and
+/// `tests/one_driver.rs` asserts on it: a plugin's `db` imports must
+/// reach the same sessions the HTTP routes opened, and two of these
+/// existing is the whole reason the packages merged.
+pub fn driver() -> RsfbDriver {
     static DRIVER: OnceLock<RsfbDriver> = OnceLock::new();
     DRIVER.get_or_init(RsfbDriver::new).clone()
 }
 
 /// Returns a static pong string. Smoke test that the binding loaded.
-#[napi]
-#[must_use]
-pub const fn ping() -> &'static str {
-    "pong from @plamenix/fbclient-node"
-}
-
-/// Initialises the global `tracing` subscriber for the Node process.
-///
-/// Idempotent: subsequent calls return `"already_initialised"` without
-/// touching the subscriber. The OTLP exporter only attaches when the
-/// `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable is set; otherwise
-/// only the fmt layer is installed.
-///
-/// Returns a short status string for the caller to log:
-/// - `"fmt_only"` — fmt layer attached, no OTLP exporter.
-/// - `"otlp:<endpoint>"` — OTLP exporter attached, shipping to endpoint.
-/// - `"already_initialised"` — a previous call installed the subscriber.
-#[napi(js_name = "initTracing")]
-pub fn init_tracing() -> Result<String> {
-    let slot = TRACING_GUARD.get_or_init(|| Mutex::new(None));
-    let mut guard_slot = slot.lock().map_err(|_| Error::from_reason("tracing lock poisoned"))?;
-    if guard_slot.is_some() {
-        return Ok("already_initialised".to_string());
-    }
-    let (guard, outcome) =
-        plamenix_tracing::init().map_err(|err| Error::from_reason(err.to_string()))?;
-    let status = match &outcome {
-        plamenix_tracing::InitOutcome::FmtOnly => "fmt_only".to_string(),
-        plamenix_tracing::InitOutcome::OtlpEnabled { endpoint, .. } => format!("otlp:{endpoint}"),
-        _ => "ok".to_string(),
-    };
-    *guard_slot = Some(guard);
-    tracing::info!(status = %status, "fbclient-node tracing initialised");
-    Ok(status)
-}
-
 /// Connection configuration mirrored from [`plamenix_db::ConnectionConfig`].
 ///
 /// Field names use `camelCase` on the JS side; `serde` keeps the Rust
@@ -331,7 +294,9 @@ pub async fn execute_batch(session_id: String, sql: String) -> Result<serde_json
     let session = parse_session(&session_id)?;
     let stmts = split_statements(&sql);
     if stmts.is_empty() {
-        return Err(Error::from_reason("No executable statements in the buffer."));
+        return Err(Error::from_reason(
+            "No executable statements in the buffer.",
+        ));
     }
     let drv = driver();
     let mut outcomes: Vec<StatementOutcome> = Vec::with_capacity(stmts.len());
@@ -346,7 +311,10 @@ pub async fn execute_batch(session_id: String, sql: String) -> Result<serde_json
         };
         match drv.execute(session, exec_sql).await {
             Ok(mut result) => {
-                if let QueryResult::Rows { rows, truncated, .. } = &mut result {
+                if let QueryResult::Rows {
+                    rows, truncated, ..
+                } = &mut result
+                {
                     if rows.len() > ROW_LIMIT as usize {
                         rows.truncate(ROW_LIMIT as usize);
                         *truncated = true;
@@ -399,18 +367,16 @@ pub async fn export_query(
             #[serde(default)]
             table: Option<TableInfo>,
         },
-        Tables { tables: Vec<TableInfo> },
+        Tables {
+            tables: Vec<TableInfo>,
+        },
     }
     let session = parse_session(&session_id)?;
     let delim: CsvDelimiter = match csv_delimiter.as_str() {
         "comma" => CsvDelimiter::Comma,
         "semicolon" => CsvDelimiter::Semicolon,
         "tab" => CsvDelimiter::Tab,
-        other => {
-            return Err(Error::from_reason(format!(
-                "invalid csvDelimiter: {other}"
-            )))
-        }
+        other => return Err(Error::from_reason(format!("invalid csvDelimiter: {other}"))),
     };
     let scope: Scope = serde_json::from_str(&scope_json)
         .map_err(|e| Error::from_reason(format!("invalid scope: {e}")))?;
@@ -419,7 +385,8 @@ pub async fn export_query(
         Scope::Tables { tables } => tables
             .into_iter()
             .map(|t| {
-                let ident = if t.name
+                let ident = if t
+                    .name
                     .chars()
                     .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
                     && !t.name.is_empty()
@@ -437,7 +404,12 @@ pub async fn export_query(
     };
 
     let drv = driver();
-    let mut payloads: Vec<(Option<TableInfo>, Option<String>, Vec<plamenix_db::Column>, Vec<plamenix_db::Row>)> = Vec::with_capacity(stmts.len());
+    let mut payloads: Vec<(
+        Option<TableInfo>,
+        Option<String>,
+        Vec<plamenix_db::Column>,
+        Vec<plamenix_db::Row>,
+    )> = Vec::with_capacity(stmts.len());
     for (table, label, sql) in stmts {
         let result = drv
             .execute(session, sql)
@@ -461,9 +433,7 @@ pub async fn export_query(
         "json" => fmt_json(&parts),
         "sql" => fmt_sql(&parts, include_ddl),
         "xml" => fmt_xml(&parts),
-        other => {
-            return Err(Error::from_reason(format!("invalid format: {other}")))
-        }
+        other => return Err(Error::from_reason(format!("invalid format: {other}"))),
     };
     Ok(out)
 }

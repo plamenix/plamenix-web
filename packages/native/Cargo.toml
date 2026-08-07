@@ -1,5 +1,5 @@
 [package]
-name = "plamenix-fbclient-node"
+name = "plamenix-native"
 version = "1.0.0-beta.0"
 edition = "2024"
 rust-version = "1.95"
@@ -9,6 +9,11 @@ description = "NAPI bindings to rsfbclient for Node.js — Plamenix web edition 
 publish = false
 
 [lib]
+# `cdylib` only. An `rlib` would let integration tests link the crate,
+# but the napi symbols (`napi_add_env_cleanup_hook` and friends) are
+# supplied by the Node process at runtime and a plain test binary has no
+# Node to supply them. Tests that need the real module are unit tests
+# inside `src/`, where the cdylib's undefined-symbol handling applies.
 crate-type = ["cdylib"]
 
 [build-dependencies]
@@ -22,6 +27,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 plamenix-types = { path = "../../../plamenix-core/crates/plamenix-types" }
 plamenix-db = { path = "../../../plamenix-core/crates/plamenix-db", default-features = false, features = ["pure-rust", "native"] }
 plamenix-tracing = { path = "../../../plamenix-core/crates/plamenix-tracing", features = ["otlp"] }
+plamenix-plugin-host = { path = "../../../plamenix-core/crates/plamenix-plugin-host" }
+plamenix-secrets = { path = "../../../plamenix-core/crates/plamenix-secrets" }
+semver = "1"
+async-trait = "0.1"
 serde_json = "1"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }

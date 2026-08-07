@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as fbclient from '@plamenix/fbclient-node';
-import type { ConnectionConfig } from '@plamenix/fbclient-node';
+import * as fbclient from '@plamenix/native';
+import type { ConnectionConfig } from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
 
 const connectBody = z.object({

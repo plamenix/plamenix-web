@@ -1,4 +1,4 @@
-import * as fbclient from '@plamenix/fbclient-node';
+import * as fbclient from '@plamenix/native';
 import { buildApp } from './app.js';
 import { loadEnv } from './env.js';
 

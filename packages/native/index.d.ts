@@ -28,11 +28,54 @@ export interface ActivationInfo {
 }
 
 /**
+ * Opens an explicit transaction. Manual mode opens one on the first
+ * statement, so this is only for starting one deliberately.
+ */
+export declare function beginTransaction(sessionId: string): Promise<any>
+
+/**
  * Clears the per-call session identifier for the named plugin.
  * Always called after a plugin invocation completes (success or
  * error) to prevent leakage into the next caller's context.
  */
 export declare function clearCallContext(pluginId: string): Promise<void>
+
+export declare function close(sessionId: string): Promise<void>
+
+/** Commits the open transaction. */
+export declare function commitTransaction(sessionId: string): Promise<any>
+
+export declare function connect(config: ConnectionConfig): Promise<ConnectionHandle>
+
+/**
+ * Returns a static pong string. Smoke test that the binding loaded.
+ * Connection configuration mirrored from [`plamenix_db::ConnectionConfig`].
+ *
+ * Field names use `camelCase` on the JS side; `serde` keeps the Rust
+ * names. The two representations stay in sync because `From<JsConfig>`
+ * performs the rename explicitly.
+ */
+export interface ConnectionConfig {
+  host: string
+  port: number
+  database: string
+  user: string
+  password: string
+  encryptionKey?: string
+  fbclientPath?: string
+  charset?: string
+  encryptionRequired: boolean
+  pureRust?: boolean
+  embedded?: boolean
+}
+
+export interface ConnectionHandle {
+  sessionId: string
+}
+
+export declare function cryptState(sessionId: string): Promise<string>
+
+export declare function databaseStats(sessionId: string): Promise<any>
 
 /**
  * Drops the plugin's registry entry, releasing the wasmtime Store and
@@ -40,6 +83,8 @@ export declare function clearCallContext(pluginId: string): Promise<void>
  * `loadPlugin` to re-stage.
  */
 export declare function deactivatePlugin(pluginId: string): Promise<void>
+
+export declare function describeSchema(sessionId: string): Promise<any>
 
 /**
  * Emits `topic` to every subscribed plugin, reporting failures to the
@@ -53,6 +98,27 @@ export declare function deactivatePlugin(pluginId: string): Promise<void>
  */
 export declare function emitEvent(topic: string, payload: string): Promise<any>
 
+export declare function execute(sessionId: string, sql: string): Promise<any>
+
+/**
+ * Splits `sql` into statements, applies the per-statement row cap to
+ * SELECT-like queries, executes each in order, and returns one
+ * [`StatementOutcome`] per parsed statement. Aborts after the first
+ * failure (mirroring the Tauri command).
+ */
+export declare function executeBatch(sessionId: string, sql: string): Promise<any>
+
+/**
+ * Runs the export pipeline server-side: executes one or more SELECTs,
+ * then builds a CSV / JSON / SQL / XML deliverable using the shared
+ * `plamenix-db::export` formatters. Returns the full text. The
+ * HTTP route on top is responsible for chunked transfer to the
+ * client.
+ */
+export declare function exportQuery(sessionId: string, format: string, csvDelimiter: string, scopeJson: string, includeDdl?: boolean | undefined | null): Promise<string>
+
+export declare function fetchBlob(sessionId: string, blobId: string): Promise<string>
+
 /**
  * Persists an optional-permission grant on the plugin's registry
  * entry. No-op when already granted. Returns the updated activated
@@ -62,7 +128,15 @@ export declare function grantPermission(pluginId: string, permission: string): P
 
 /**
  * Initialises the global `tracing` subscriber for the Node process.
+ *
  * Idempotent: subsequent calls return `"already_initialised"`.
+ *
+ * One function rather than the two the split packages each exported.
+ * The subscriber is process-global, so a second initialiser was never
+ * doing anything except making it unclear which one mattered.
+ * # Errors
+ *
+ * When the tracing subscriber could not be installed.
  */
 export declare function initTracing(): string
 
@@ -71,6 +145,14 @@ export declare function initTracing(): string
  * state; safe to call from any Fastify request handler.
  */
 export declare function listActive(): Promise<Array<ActivatedPluginInfo>>
+
+/**
+ * Reads the host's `databases.conf` (when one is found at a known
+ * install path) and returns the simple-form alias entries declared in
+ * it. When no candidate file exists, returns an empty list with
+ * `sourcePath = null`.
+ */
+export declare function listAliases(): any
 
 /**
  * Which plugins are wired into which interceptor chain, in resolved
@@ -82,6 +164,7 @@ export declare function listActive(): Promise<Array<ActivatedPluginInfo>>
 export declare function listInterceptors(): any
 
 /**
+ * Returns a static pong string. Smoke test that the binding loaded.
  * Loads a plugin bundle from disk. Validates the manifest, compiles
  * the WASM component, registers the plugin in the process-wide
  * registry, and returns a snapshot of staged-plugin metadata.
@@ -90,6 +173,12 @@ export declare function loadPlugin(bundlePath: string): Promise<StagedPluginInfo
 
 /** Returns a static pong string. Smoke test that the binding loaded. */
 export declare function ping(): string
+
+export interface PingResult {
+  engineVersion: string
+}
+
+export declare function pingSession(sessionId: string): Promise<PingResult>
 
 export interface PluginLogEntry {
   level: string
@@ -120,6 +209,12 @@ export declare function reloadPlugin(pluginId: string): Promise<ActivatedPluginI
 export declare function revokePermission(pluginId: string, permission: string): Promise<void>
 
 /**
+ * Rolls back the open transaction, discarding every statement since it
+ * opened — DDL included.
+ */
+export declare function rollbackTransaction(sessionId: string): Promise<any>
+
+/**
  * Runs the plugin segment of an interceptor chain and returns its
  * verdict.
  *
@@ -143,6 +238,15 @@ export declare function runInterceptors(extensionPoint: string, contextJson: str
  * seeing another's identifier on a subsequent unrelated call.
  */
 export declare function setCallContext(pluginId: string, sessionId: string): Promise<void>
+
+/**
+ * Switches a session between autocommit and manual commit.
+ *
+ * `config` is the JSON form of `TxConfig`; omit it to keep the
+ * session's current settings. Refused while a transaction is open, so
+ * a mode change cannot silently commit or discard outstanding work.
+ */
+export declare function setTransactionMode(sessionId: string, mode: any, config?: any | undefined | null): Promise<any>
 
 export interface SidebarPanelInfo {
   id: string
@@ -168,3 +272,17 @@ export interface StagedPluginInfo {
   requiredPermissions: Array<string>
   optionalPermissions: Array<string>
 }
+
+/**
+ * Tries to attach with the supplied configuration, fetches the engine
+ * version, then closes the session. Always resolves with a structured
+ * result (no thrown error on a clean failure); the `ok` flag tells the
+ * caller whether the attempt succeeded.
+ */
+export declare function testConnection(config: ConnectionConfig): Promise<any>
+
+/**
+ * Current transaction state. Answered from driver state without
+ * touching the engine, so it is safe to poll for the age readout.
+ */
+export declare function transactionStatus(sessionId: string): Promise<any>

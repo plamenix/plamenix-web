@@ -1,4 +1,3 @@
-#![deny(clippy::all)]
 //! NAPI bindings to `plamenix-plugin-host`.
 //!
 //! Exposes plugin lifecycle (load → activate → deactivate) to the
@@ -22,14 +21,11 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_plugin_host::{
     ActivationOutcome, DispatchOutcome, EpochTicker, EventBus, ExtensionPoint, FailureKind,
-    HostState, InstanceRegistry, InterceptorRegistration, InterceptorRegistry, LogSink, Permission, PluginError, PluginHost, SessionSlot, StagedPlugin,
-    Supervisor, activate_into_registry, dispatch_event_supervised, load,
+    HostState, InstanceRegistry, InterceptorRegistration, InterceptorRegistry, LogSink, Permission,
+    PluginError, PluginHost, SessionSlot, StagedPlugin, Supervisor, activate_into_registry,
+    dispatch_event_supervised, load,
 };
-use plamenix_tracing::TracingGuard;
 use semver::Version;
-
-/// Holds the global tracing guard for the lifetime of the Node module.
-static TRACING_GUARD: OnceLock<Mutex<Option<TracingGuard>>> = OnceLock::new();
 
 /// Host version surfaced to plugins via the `host.host-version` import.
 /// Mirrored from the workspace `1.0.0-beta` line; bump in lockstep when
@@ -73,6 +69,32 @@ fn supervisor() -> &'static Supervisor {
 fn instances() -> &'static InstanceRegistry {
     static INSTANCES: OnceLock<InstanceRegistry> = OnceLock::new();
     INSTANCES.get_or_init(InstanceRegistry::new)
+}
+
+/// Root for per-plugin data directories.
+///
+/// `PLUGIN_DATA_ROOT` is what the server already allocates per plugin
+/// (see its `env.ts`); reading the same variable here keeps the host
+/// and the server pointing at one directory rather than two.
+fn plugin_data_dir(plugin_id: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var("PLUGIN_DATA_ROOT").unwrap_or_else(|_| "./plugin-data".to_owned()),
+    )
+    .join(plugin_id)
+    .join("data")
+}
+
+/// Capability strings the user has approved for one plugin.
+///
+/// Read by [`crate::services::WebHostServices::granted_for`] once per
+/// plugin call. The SQLite store is the authority and this in-memory
+/// set is what it replays into at boot and on grant.
+pub(crate) fn granted_for(plugin_id: &str) -> std::collections::HashSet<String> {
+    registry()
+        .lock()
+        .ok()
+        .and_then(|reg| reg.get(plugin_id).map(|entry| entry.granted.clone()))
+        .unwrap_or_default()
 }
 
 /// Which plugins asked to be consulted before an operation commits.
@@ -129,30 +151,6 @@ struct ActivePluginEntry {
 }
 
 /// Returns a static pong string. Smoke test that the binding loaded.
-#[napi]
-#[must_use]
-pub const fn ping() -> &'static str {
-    "pong from @plamenix/plugin-host-node"
-}
-
-/// Initialises the global `tracing` subscriber for the Node process.
-/// Idempotent: subsequent calls return `"already_initialised"`.
-#[napi]
-pub fn init_tracing() -> String {
-    let slot = TRACING_GUARD.get_or_init(|| Mutex::new(None));
-    let mut held = slot.lock().expect("tracing guard mutex");
-    if held.is_some() {
-        return "already_initialised".to_string();
-    }
-    match plamenix_tracing::init() {
-        Ok((guard, _outcome)) => {
-            *held = Some(guard);
-            "initialised".to_string()
-        }
-        Err(err) => format!("init_failed: {err}"),
-    }
-}
-
 /// Loads a plugin bundle from disk. Validates the manifest, compiles
 /// the WASM component, registers the plugin in the process-wide
 /// registry, and returns a snapshot of staged-plugin metadata.
@@ -214,10 +212,25 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
 
     let host_ref = host()?.clone();
     ensure_epoch_ticker(&host_ref);
+    // Everything a plugin may reach. Until this existed the web
+    // edition handed the host `NoServices` and every import beyond
+    // logging refused.
+    let data_dir = plugin_data_dir(&staged_arc.manifest.plugin.id);
+    if let Err(err) = std::fs::create_dir_all(&data_dir) {
+        tracing::warn!(
+            plugin = %staged_arc.manifest.plugin.id,
+            ?err,
+            "could not create the plugin's data directory; its fs and settings imports will fail",
+        );
+    }
     let state = HostState::new(&staged_arc.manifest.plugin.id, HOST_VERSION)
         .with_edition(EDITION)
         .with_log_sink(Arc::clone(&log_sink_clone))
-        .with_session_slot(Arc::clone(&session_slot_clone));
+        .with_session_slot(Arc::clone(&session_slot_clone))
+        .with_services(Arc::new(crate::services::WebHostServices))
+        .with_world(staged_arc.manifest.plugin.world_tier)
+        .with_declared_permissions(staged_arc.manifest.permissions.clone())
+        .with_data_dir(&data_dir);
 
     // Registers the live store rather than dropping it. A failed
     // activation is not registered — the activator drops that store

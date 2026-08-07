@@ -1,22 +1,22 @@
 {
-  "name": "@plamenix/plugin-host-node",
+  "name": "@plamenix/native",
   "version": "1.0.0-beta.0",
-  "description": "NAPI bindings to plamenix-plugin-host — Plamenix web edition plugin runtime.",
+  "description": "NAPI bindings for the Plamenix web edition: the Firebird driver and the WASM plugin host, in one native module so they share one driver instance.",
   "main": "index.js",
   "types": "index.d.ts",
   "type": "commonjs",
   "license": "(MIT OR Apache-2.0)",
-  "author": "Zlatan Omerović <zlomerovic@hotmail.com>",
+  "author": "Zlatan Omerovi\u0107 <zlomerovic@hotmail.com>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zlatan/plamenix-web.git",
-    "directory": "packages/plugin-host-node"
+    "directory": "packages/native"
   },
   "engines": {
     "node": ">=24"
   },
   "napi": {
-    "binaryName": "plamenix-plugin-host",
+    "binaryName": "plamenix-native",
     "targets": [
       "x86_64-apple-darwin",
       "aarch64-apple-darwin",

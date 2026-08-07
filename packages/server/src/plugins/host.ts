@@ -3,7 +3,7 @@
  *
  * Walks `env.PLUGINS_PATH` for every direct subdirectory containing
  * `manifest.toml` and loads + activates each as a Plamenix plugin via
- * `@plamenix/plugin-host-node`. Surfaces the active list for the
+ * `@plamenix/native`. Surfaces the active list for the
  * Fastify route layer.
  *
  * Mirrors the responsibilities of `plamenix-desktop/src-tauri/src/plugins.rs`
@@ -14,11 +14,11 @@
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import * as pluginHost from '@plamenix/plugin-host-node';
+import * as pluginHost from '@plamenix/native';
 import type {
   ActivatedPluginInfo,
   StagedPluginInfo,
-} from '@plamenix/plugin-host-node';
+} from '@plamenix/native';
 import { ensurePluginDataDir } from './storage.js';
 import type { PluginGrantStore } from './grants.js';
 

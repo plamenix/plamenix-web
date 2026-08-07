@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as fbclient from '@plamenix/fbclient-node';
+import * as fbclient from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
 
 /** Mirrors `TxIsolation`. `consistency` is deliberately not offered: it

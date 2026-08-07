@@ -1,7 +1,7 @@
 /**
  * Per-plugin grant store backed by a single SQLite file.
  *
- * The napi binding (`@plamenix/plugin-host-node`) holds the
+ * The napi binding (`@plamenix/native`) holds the
  * **runtime** grant set in memory — capability checks at the host-
  * import layer read from there. The server's SQLite store is the
  * **authority**: grants persist across restarts, the bootstrap

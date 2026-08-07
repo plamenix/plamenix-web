@@ -1,5 +1,5 @@
 // In-memory session store for M1. Each entry remembers a Firebird
-// attachment held inside `@plamenix/fbclient-node`. The native binding
+// attachment held inside `@plamenix/native`. The native binding
 // owns the actual connection; this store tracks bookkeeping (creation
 // time, optional metadata) so we can expire stale sessions or report
 // active count from the server side.
