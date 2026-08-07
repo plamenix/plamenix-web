@@ -36,7 +36,8 @@ import {
   ShortcutsCheatSheet,
   getModKeyLabel,
   registerBuiltinDefaultKeybindings,
-  connectionOpeningChain,
+  useConnectionActions,
+  type ConnectionAdapter,
   editorSavingChain,
   installPluginInterceptors,
   type ExtensionPoint,
@@ -65,7 +66,6 @@ import {
   useEmitSettingsThemeEvents,
   useEmitTabEvents,
   useResolvedThemeMode,
-  useHealthProbe,
   useRecentQueries,
   useTabsStore,
   useThemeStore,
@@ -473,159 +473,77 @@ export function App() {
     }
   };
 
-  const handleConnect = async () => {
-    const tabId = activeTabId;
-    const tab = activeTab;
-    const decision = await connectionOpeningChain.run({
-      tabId,
-      profileId: tab.selectedProfileId,
-      host: tab.form.host,
-      port: tab.form.port,
-      database: tab.form.database,
-      user: tab.form.user,
-      pureRust: tab.form.pureRust,
-      encryptionRequired: tab.form.encryptionRequired,
-      charset: tab.form.charset,
-    });
-    if (decision.action === 'cancel') {
-      patchTab(tabId, { error: decision.reason });
-      return;
-    }
-    patchTab(tabId, { error: null, busy: true, cryptState: null });
-    try {
-      let response: ConnectResponse;
-      if (tab.selectedProfileId !== null) {
-        const args: ProfileConnectArgs = {
-          password: tab.form.password,
-          pureRust: tab.form.pureRust,
-          encryptionRequired: tab.form.encryptionRequired,
-        };
-        if (tab.form.encryptionKey !== '') {
-          args.encryptionKey = tab.form.encryptionKey;
+  // Connect, reconnect, test, the health probe and auto-reconnect live
+  // in `@plamenix/ui` now. The desktop shell ran a near-identical copy
+  // of every one of them, and one of the two had already drifted. What
+  // stays here is what is genuinely this edition's: HTTP endpoints, the
+  // profile route that keeps the password out of the URL, and
+  // `undefined` rather than `null` for an absent optional field.
+  const connectionAdapter = useMemo<ConnectionAdapter>(
+    () => ({
+      connect: ({ form, profileId }) => {
+        if (profileId !== null) {
+          const args: ProfileConnectArgs = {
+            password: form.password,
+            pureRust: form.pureRust,
+            encryptionRequired: form.encryptionRequired,
+          };
+          if (form.encryptionKey !== '') args.encryptionKey = form.encryptionKey;
+          if (form.fbclientPath !== '') args.fbclientPath = form.fbclientPath;
+          if (form.charset !== '') args.charset = form.charset;
+          return connectByProfile(profileId, args);
         }
-        if (tab.form.fbclientPath !== '') {
-          args.fbclientPath = tab.form.fbclientPath;
-        }
-        if (tab.form.charset !== '') {
-          args.charset = tab.form.charset;
-        }
-        response = await connectByProfile(tab.selectedProfileId, args);
-      } else {
-        response = await fetchTransport.invoke<ConnectResponse>('connect', {
-          host: tab.form.host,
-          port: tab.form.port,
-          database: tab.form.database,
-          user: tab.form.user,
-          password: tab.form.password,
-          encryptionKey: tab.form.encryptionKey === '' ? undefined : tab.form.encryptionKey,
-          encryptionRequired: tab.form.encryptionRequired,
-          pureRust: tab.form.pureRust,
-          fbclientPath: tab.form.fbclientPath === '' ? undefined : tab.form.fbclientPath,
-          charset: tab.form.charset === '' ? undefined : tab.form.charset,
+        return fetchTransport.invoke<ConnectResponse>('connect', {
+          host: form.host,
+          port: form.port,
+          database: form.database,
+          user: form.user,
+          password: form.password,
+          encryptionKey: form.encryptionKey === '' ? undefined : form.encryptionKey,
+          encryptionRequired: form.encryptionRequired,
+          pureRust: form.pureRust,
+          fbclientPath: form.fbclientPath === '' ? undefined : form.fbclientPath,
+          charset: form.charset === '' ? undefined : form.charset,
         });
-      }
-      patchTab(tabId, {
-        sessionId: response.sessionId,
-        results: null,
-        health: 'healthy',
-        lastPingAt: Date.now(),
-        connectedAt: Date.now(),
-      });
-      renameTab(tabId, tab.profileName.trim() || deriveTitle(tab.form));
-      void refreshCryptState(tabId, response.sessionId);
-      void refreshTxStatus(tabId, response.sessionId);
-      void refreshSchema(tabId, response.sessionId);
-      void refreshEngineVersion(tabId, response.sessionId);
-    } catch (err) {
-      patchTab(tabId, { error: String(err) });
-    } finally {
-      patchTab(tabId, { busy: false });
-    }
-  };
+      },
+      testConnection: (form) =>
+        fetchTransport.invoke<TestConnectionResult>('test-connection', {
+          host: form.host,
+          port: form.port,
+          database: form.database,
+          user: form.user,
+          password: form.password,
+          encryptionKey: form.encryptionKey === '' ? undefined : form.encryptionKey,
+          encryptionRequired: form.encryptionRequired,
+          pureRust: form.pureRust,
+          fbclientPath: form.fbclientPath === '' ? undefined : form.fbclientPath,
+          charset: form.charset === '' ? undefined : form.charset,
+        }),
+      pingSession: (sessionId) =>
+        fetchTransport
+          .invoke<{ engineVersion: string }>('ping-session', { sessionId })
+          .then((r) => r.engineVersion),
+    }),
+    [],
+  );
 
-  const handleReconnect = useCallback(async () => {
-    const tabId = activeTabId;
-    const tab = activeTab;
-    if (tab.health === 'reconnecting') return;
-    patchTab(tabId, { health: 'reconnecting', error: null });
-    try {
-      let response: ConnectResponse;
-      if (tab.selectedProfileId !== null) {
-        const args: ProfileConnectArgs = {
-          password: tab.form.password,
-          pureRust: tab.form.pureRust,
-          encryptionRequired: tab.form.encryptionRequired,
-        };
-        if (tab.form.encryptionKey !== '') {
-          args.encryptionKey = tab.form.encryptionKey;
-        }
-        if (tab.form.fbclientPath !== '') {
-          args.fbclientPath = tab.form.fbclientPath;
-        }
-        if (tab.form.charset !== '') {
-          args.charset = tab.form.charset;
-        }
-        response = await connectByProfile(tab.selectedProfileId, args);
-      } else {
-        response = await fetchTransport.invoke<ConnectResponse>('connect', {
-          host: tab.form.host,
-          port: tab.form.port,
-          database: tab.form.database,
-          user: tab.form.user,
-          password: tab.form.password,
-          encryptionKey: tab.form.encryptionKey === '' ? undefined : tab.form.encryptionKey,
-          encryptionRequired: tab.form.encryptionRequired,
-          pureRust: tab.form.pureRust,
-          fbclientPath: tab.form.fbclientPath === '' ? undefined : tab.form.fbclientPath,
-          charset: tab.form.charset === '' ? undefined : tab.form.charset,
-        });
-      }
-      patchTab(tabId, {
-        sessionId: response.sessionId,
-        health: 'healthy',
-        lastPingAt: Date.now(),
-        connectedAt: Date.now(),
-      });
-      const newSessionId = response.sessionId;
-      void fetchTransport
-        .invoke<{ engineVersion: string }>('ping-session', { sessionId: newSessionId })
-        .then((r) =>
-          patchTab(tabId, {
-            engineVersion: r.engineVersion.trim().length > 0 ? r.engineVersion.trim() : null,
-          }),
-        )
-        .catch(() => patchTab(tabId, { engineVersion: null }));
-    } catch (err) {
-      patchTab(tabId, { health: 'dead', error: String(err) });
-    }
-  }, [activeTab, activeTabId, patchTab]);
-
-  useHealthProbe({
+  const autoReconnect = useConnectionPrefs((s) => s.autoReconnect);
+  const { handleConnect, handleReconnect, handleTestConnection } = useConnectionActions({
+    adapter: connectionAdapter,
+    activeTab,
     tabs,
-    ping: (sessionId) =>
-      fetchTransport
-        .invoke<{ engineVersion: string }>('ping-session', { sessionId })
-        .then((r) => r.engineVersion),
-    onPatch: (tabId, patch) => patchTab(tabId, patch),
+    patchTab,
+    renameTab,
+    deriveTitle,
+    autoReconnect,
+    onConnected: (tabId, sessionId) => {
+      void refreshCryptState(tabId, sessionId);
+      void refreshTxStatus(tabId, sessionId);
+      void refreshSchema(tabId, sessionId);
+      void refreshEngineVersion(tabId, sessionId);
+    },
   });
 
-  // Auto-reconnect: same single-shot-per-dead pattern as desktop.
-  const autoReconnect = useConnectionPrefs((s) => s.autoReconnect);
-  const lastAutoDeadRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!autoReconnect) {
-      lastAutoDeadRef.current = null;
-      return;
-    }
-    if (activeTab.health !== 'dead') {
-      lastAutoDeadRef.current = null;
-      return;
-    }
-    if (activeTab.busy) return;
-    if (lastAutoDeadRef.current === activeTab.id) return;
-    lastAutoDeadRef.current = activeTab.id;
-    void handleReconnect();
-  }, [activeTab.health, activeTab.busy, activeTab.id, autoReconnect, handleReconnect]);
 
   // Wires activated plugins into the interceptor chains. Runs once:
   // the web edition activates plugins server-side at boot, so unlike
@@ -1226,38 +1144,6 @@ export function App() {
       patchTab(tabId, { error: String(err) });
     } finally {
       patchTab(tabId, { busy: false });
-    }
-  };
-
-  const handleTestConnection = async () => {
-    const tabId = activeTabId;
-    const tab = activeTab;
-    patchTab(tabId, { testing: true, testResult: null });
-    try {
-      const res = await fetchTransport.invoke<TestConnectionResult>('test-connection', {
-        host: tab.form.host,
-        port: tab.form.port,
-        database: tab.form.database,
-        user: tab.form.user,
-        password: tab.form.password,
-        encryptionKey: tab.form.encryptionKey === '' ? undefined : tab.form.encryptionKey,
-        encryptionRequired: tab.form.encryptionRequired,
-        pureRust: tab.form.pureRust,
-        fbclientPath: tab.form.fbclientPath === '' ? undefined : tab.form.fbclientPath,
-        charset: tab.form.charset === '' ? undefined : tab.form.charset,
-      });
-      patchTab(tabId, { testResult: res });
-    } catch (err) {
-      patchTab(tabId, {
-        testResult: {
-          ok: false,
-          firebirdVersion: null,
-          error: String(err),
-          durationMs: 0,
-        },
-      });
-    } finally {
-      patchTab(tabId, { testing: false });
     }
   };
 
