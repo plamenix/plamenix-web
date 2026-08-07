@@ -315,8 +315,8 @@ export function pluginsRoute(options: PluginsRouteOptions) {
         // Persist first — if the napi push then fails, the next boot
         // replays the persisted grant and the operator sees consistent
         // state. The opposite ordering would risk losing a grant if
-        // the server crashed between the napi push and the SQLite
-        // commit.
+        // the server crashed between the napi push and the write
+        // to the metadata database.
         await grantStore.add(idParsed.data.id, bodyParsed.data.permission, declared);
         await pluginHost.grantPermission(idParsed.data.id, bodyParsed.data.permission);
         const active = await pluginHost.listActive();
@@ -509,7 +509,7 @@ export function pluginsRoute(options: PluginsRouteOptions) {
       }
       try {
         // Same persist-first ordering as grant — a crash between
-        // SQLite delete and napi revoke leaves the runtime granting a
+        // the delete and the napi revoke leaves the runtime granting a
         // capability the authority no longer holds, but the next boot
         // reconciles by replaying only the persisted grants (the
         // revoked one is absent, so it falls out).

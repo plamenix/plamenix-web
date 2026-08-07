@@ -1,8 +1,8 @@
 //! The metadata database, exposed to the Fastify server.
 //!
-//! `plamenix-meta` is Rust and the server is Node, so the audit log —
-//! and, once history and grants move, everything else that used to be
-//! SQLite — reaches it through here.
+//! `plamenix-meta` is Rust and the server is Node, so the audit log,
+//! the query history, and plugin grants — everything that used to be
+//! SQLite — reach it through here.
 //!
 //! One store for the process, opened once. Firebird's embedded engine
 //! takes the file exclusively, so opening per call would not merely be
@@ -110,7 +110,7 @@ pub async fn audit_recent(limit: Option<u32>) -> Result<serde_json::Value> {
 // Query history and plugin grants.
 //
 // Both were `better-sqlite3` in the Fastify server and `rusqlite` in the
-// desktop shell — the same schema written twice. They are one Rust
+// desktop shell — the same schema written twice. One Rust
 // implementation now, reached from Node through here.
 // ---------------------------------------------------------------------
 

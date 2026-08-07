@@ -7,7 +7,7 @@
  * <PLUGIN_DATA_ROOT>/
  *   <plugin-id>/
  *     data/          plugin's writable space (WASI preopen target in I6)
- *     grants.json    optional sidecar; superseded by SQLite store in I1.6
+ *     grants.json    optional sidecar; superseded by the metadata database
  * ```
  *
  * Rules enforced here:

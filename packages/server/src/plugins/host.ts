@@ -7,9 +7,9 @@
  * Fastify route layer.
  *
  * Mirrors the responsibilities of `plamenix-desktop/src-tauri/src/plugins.rs`
- * adapted for a multi-tenant server context. Grant persistence lands
- * in Section I1.6 (SQLite-backed); for now grants live in-memory in
- * the napi binding's registry.
+ * adapted for a multi-tenant server context. Grants persist in the
+ * metadata database and are replayed at boot into the napi binding's
+ * in-memory registry, which is what capability checks read.
  */
 
 import { promises as fs } from 'node:fs';

@@ -87,8 +87,8 @@ fn plugin_data_dir(plugin_id: &str) -> std::path::PathBuf {
 /// Capability strings the user has approved for one plugin.
 ///
 /// Read by [`crate::services::WebHostServices::granted_for`] once per
-/// plugin call. The SQLite store is the authority and this in-memory
-/// set is what it replays into at boot and on grant.
+/// plugin call. The metadata database is the authority and this
+/// in-memory set is what it replays into at boot and on grant.
 pub(crate) fn granted_for(plugin_id: &str) -> std::collections::HashSet<String> {
     registry()
         .lock()
