@@ -22,7 +22,6 @@ import {
   notifyMutations,
   SchemaBrowser,
   SchemaEditorModal,
-  schemaDdl,
   sourceQuery,
   SettingsButton,
   SettingsPage,
@@ -40,6 +39,7 @@ import {
   useShellCommands,
   resolveStatement,
   dispatchSchemaDdl,
+  applySchemaAction,
   firstRows,
   firstAffected,
   type ConnectionAdapter,
@@ -53,12 +53,10 @@ import {
   emitExportCompleted,
   emitExportFailed,
   emitExportStarted,
-  emitSchemaActionApplied,
   emitEditorFocused,
   emitEditorSelectionChanged,
   exportStartingChain,
   newExportId,
-  schemaActionApplyingChain,
   useGlobalKeybindings,
   useConnectionPrefs,
   useEmitConnectionEvents,
@@ -944,33 +942,12 @@ export function App() {
   };
 
   const handleSchemaAction = async (action: SchemaAction) => {
-    const ddl = schemaDdl(action);
-    if (activeTab.sessionId !== null) {
-      const decision = await schemaActionApplyingChain.run({
-        tabId: activeTabId,
-        sessionId: activeTab.sessionId,
-        kind: action.kind,
-        action: action.action,
-        targetName: action.target.name,
-        ddl: ddl.sql,
-      });
-      if (decision.action === 'cancel') {
-        patchTab(activeTabId, { error: decision.reason });
-        return;
-      }
-    }
-    const executed = await dispatchDdl(ddl);
-    if (executed) {
-      emitSchemaActionApplied({
-        tabId: activeTabId,
-        sessionId: activeTab.sessionId,
-        kind: action.kind,
-        action: action.action,
-        targetName: action.target.name,
-        ddl: ddl.sql,
-        appliedAt: Date.now(),
-      });
-    }
+    await applySchemaAction(action, {
+      tabId: activeTabId,
+      sessionId: activeTab.sessionId,
+      dispatch: dispatchDdl,
+      patch: (patch) => patchTab(activeTabId, patch),
+    });
   };
 
   /// Pulls the session's transaction state into the tab, so the
