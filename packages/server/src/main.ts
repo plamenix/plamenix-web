@@ -20,6 +20,16 @@ async function main(): Promise<void> {
 
   try {
     await app.listen({ host: env.HOST, port: env.PORT });
+    // Said out loud at boot. There is no authentication on any route,
+    // so a non-loopback bind means anyone who can reach the port gets
+    // whatever the configured Firebird user has. That should be a
+    // decision an operator took, not one they discover later.
+    if (env.HOST !== '127.0.0.1' && env.HOST !== 'localhost' && env.HOST !== '::1') {
+      app.log.warn(
+        { host: env.HOST, port: env.PORT },
+        'listening on a non-loopback address with no authentication; put an authenticating proxy in front of this',
+      );
+    }
   } catch (err) {
     app.log.error({ err }, 'failed to start plamenix-web server');
     process.exit(1);

@@ -42,11 +42,11 @@ export async function buildApp(env: Env) {
   const pluginGrantStore = new PluginGrantStore(env.PLUGIN_GRANTS_PATH);
 
   await app.register(pingRoute);
-  await app.register(connectRoute);
+  await app.register(connectRoute(env));
   await app.register(executeRoute(historyStore));
   await app.register(exportRoute);
   await app.register(transactionRoute);
-  await app.register(profilesRoute(profileStore));
+  await app.register(profilesRoute(profileStore, env));
   await app.register(historyRoute(historyStore));
   await app.register(
     pluginsRoute({
