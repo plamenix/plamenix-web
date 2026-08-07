@@ -21,9 +21,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_plugin_host::{
-    ActivationOutcome, DispatchOutcome, EpochTicker, EventBus, HostState, InstanceRegistry,
-    LogSink, Permission, PluginError, PluginHost, SessionSlot, StagedPlugin, Supervisor,
-    activate_into_registry, dispatch_event_supervised, load,
+    ActivationOutcome, DispatchOutcome, EpochTicker, EventBus, FailureKind, HostState,
+    InstanceRegistry, LogSink, Permission, PluginError, PluginHost, SessionSlot, StagedPlugin,
+    Supervisor, activate_into_registry, dispatch_event_supervised, load,
 };
 use plamenix_tracing::TracingGuard;
 use semver::Version;
@@ -273,15 +273,27 @@ pub async fn emit_event(topic: String, payload: String) -> Result<serde_json::Va
     let view: Vec<serde_json::Value> = deliveries
         .into_iter()
         .map(|d| {
-            let (status, detail) = match &d.outcome {
-                DispatchOutcome::Delivered => ("delivered", None),
-                DispatchOutcome::NotInstantiated => ("notInstantiated", None),
-                DispatchOutcome::Closed => ("closed", None),
-                DispatchOutcome::Failed(message) => ("failed", Some(message.clone())),
+            let (status, reason, detail) = match &d.outcome {
+                DispatchOutcome::Delivered => ("delivered", None, None),
+                DispatchOutcome::NotInstantiated => ("notInstantiated", None, None),
+                DispatchOutcome::Closed => ("closed", None, None),
+                // `reason` separates a plugin that was too slow from one
+                // that trapped. `detail` is the whole error chain, which
+                // is where the wasm backtrace lives.
+                DispatchOutcome::Failed(failure) => (
+                    "failed",
+                    Some(match failure.kind {
+                        FailureKind::Deadline => "deadline",
+                        FailureKind::Trapped => "trapped",
+                        FailureKind::Host => "host",
+                    }),
+                    Some(failure.message.clone()),
+                ),
             };
             serde_json::json!({
                 "pluginId": d.plugin_id,
                 "status": status,
+                "reason": reason,
                 "detail": detail,
                 // Present only when the plugin failed; the supervisor
                 // does not weigh in on a successful delivery.

@@ -33,6 +33,14 @@ export declare function activatePlugin(pluginId: string): Promise<ActivatedPlugi
 export declare function emitEvent(topic: string, payload: string): Promise<Array<{
   pluginId: string
   status: 'delivered' | 'notInstantiated' | 'closed' | 'failed'
+  /**
+   * Why a `failed` delivery failed. `deadline` means the plugin ran
+   * past its time budget and the host interrupted it; `trapped` means
+   * the guest itself faulted; `host` means the failure was on our side
+   * of the boundary. `null` unless `status` is `failed`.
+   */
+  reason: 'deadline' | 'trapped' | 'host' | null
+  /** The full error chain, including the wasm backtrace. */
   detail: string | null
   disabled: boolean
 }>>
