@@ -27,6 +27,15 @@ use plamenix_types::{
     DatabaseAlias as DbAlias, ListAliasesResult as ListAliases, TestConnectionResult as TestResult,
 };
 
+/// Hard cap on rows an export may produce, across every statement in
+/// its scope.
+///
+/// Large enough that a real export is not truncated by surprise, small
+/// enough that one request cannot exhaust a process shared by every
+/// other request. Callers that need more pass `maxRows` explicitly and
+/// take responsibility for the memory.
+pub const DEFAULT_EXPORT_ROW_CAP: u32 = 1_000_000;
+
 /// Hard cap on rows surfaced per SELECT statement. Mirrors the desktop
 /// edition's behaviour; the web shell may relax it later for power users.
 const ROW_LIMIT: u32 = 10_000;
@@ -355,8 +364,17 @@ pub async fn export_query(
     // the Specta-less napi binding doesn't need an enum struct.
     scope_json: String,
     include_ddl: Option<bool>,
+    max_rows: Option<u32>,
 ) -> Result<String> {
     let include_ddl = include_ddl.unwrap_or(true);
+    // Bounded at the producer, not at the response.
+    //
+    // The route "streams" its result, but only the socket write is
+    // chunked: the whole export exists as a String here and again as a
+    // Buffer in Node before the first byte leaves. An unbounded export
+    // is therefore a memory spike in a process that serves every
+    // request, triggered by one statement over one session.
+    let max_rows = max_rows.unwrap_or(DEFAULT_EXPORT_ROW_CAP);
     #[derive(serde::Deserialize)]
     #[serde(tag = "kind", rename_all = "camelCase")]
     enum Scope {
@@ -410,13 +428,34 @@ pub async fn export_query(
         Vec<plamenix_db::Column>,
         Vec<plamenix_db::Row>,
     )> = Vec::with_capacity(stmts.len());
+    let mut budget = max_rows as usize;
     for (table, label, sql) in stmts {
+        // Cap in the statement so Firebird stops producing, rather than
+        // trimming rows the driver already materialised. Statements
+        // that cannot take a `ROWS` clause, or already carry one, go
+        // through unchanged and are trimmed below.
+        let capped = if plamenix_db::accepts_row_limit(&sql) {
+            plamenix_db::inject_row_limit(&sql, budget.min(u32::MAX as usize) as u32)
+        } else {
+            sql
+        };
         let result = drv
-            .execute(session, sql)
+            .execute(session, capped)
             .await
             .map_err(|e| Error::from_reason(e.to_string()))?;
-        if let QueryResult::Rows { columns, rows, .. } = result {
+        if let QueryResult::Rows {
+            columns, mut rows, ..
+        } = result
+        {
+            if rows.len() > budget {
+                rows.truncate(budget);
+            }
+            budget -= rows.len();
             payloads.push((table, label, columns, rows));
+            if budget == 0 {
+                // Every remaining statement would contribute nothing.
+                break;
+            }
         }
     }
     let parts: Vec<ExportPart<'_>> = payloads

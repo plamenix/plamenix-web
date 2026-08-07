@@ -40,6 +40,31 @@ const schema = z.object({
   // pure-Rust, which is the safe default for a server that ships no
   // fbclient of its own.
   FBCLIENT_PATH: z.string().optional(),
+  // Token every `/api/*` request must present as `Authorization:
+  // Bearer <token>`. Generated at boot when unset — there is no
+  // unauthenticated mode, because a control that switches itself off by
+  // omission is off everywhere nobody looked.
+  AUTH_TOKEN: z.string().optional(),
+  // Extra host names to answer to, beyond loopback. Only set this
+  // behind a proxy you control: the Host allowlist is what stops DNS
+  // rebinding, and a wildcard here removes that protection.
+  ALLOWED_HOSTS: z
+    .string()
+    .default('')
+    .transform((raw) => raw.split(',').map((h) => h.trim().toLowerCase()).filter((h) => h !== '')),
+  // Close a Firebird attachment after this long without a request that
+  // names it. Without reaping, a closed tab or a slept laptop leaves an
+  // attachment open until the process dies.
+  SESSION_IDLE_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
+  // How often the reaper sweeps.
+  SESSION_SWEEP_MS: z.coerce.number().int().positive().default(60 * 1000),
+  // Rows an export may produce across its whole scope.
+  EXPORT_MAX_ROWS: z.coerce.number().int().positive().default(1_000_000),
+  // Directory holding the built SPA. When present the server serves it,
+  // which is what makes the web edition reachable at all — it served no
+  // static assets, so the client was reachable neither same-origin nor,
+  // with production CORS off, cross-origin.
+  CLIENT_DIST: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;

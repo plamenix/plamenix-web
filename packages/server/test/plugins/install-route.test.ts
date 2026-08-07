@@ -14,7 +14,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildApp, type App } from '../../src/app.js';
+import { buildAuthedApp } from '../helpers/authed.js';
+import { type App } from '../../src/app.js';
 import { loadEnv } from '../../src/env.js';
 
 describe('POST /api/plugins/install (I7.8 stub)', () => {
@@ -28,16 +29,14 @@ describe('POST /api/plugins/install (I7.8 stub)', () => {
     const grantsPath = join(workDir, 'grants.sqlite');
     const profilesPath = join(workDir, 'profiles.json');
     const historyPath = join(workDir, 'history.sqlite');
-    const env = loadEnv({
+    app = await buildAuthedApp({
       PLUGINS_PATH: pluginsDir,
       PLUGIN_DATA_ROOT: pluginDataRoot,
       PLUGIN_GRANTS_PATH: grantsPath,
       PROFILES_PATH: profilesPath,
       HISTORY_PATH: historyPath,
-      NODE_ENV: 'test',
       LOG_LEVEL: 'fatal',
     });
-    app = await buildApp(env);
     await app.ready();
   });
 

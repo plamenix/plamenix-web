@@ -15,7 +15,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildApp, type App } from '../../src/app.js';
+import { buildAuthedApp } from '../helpers/authed.js';
+import { type App } from '../../src/app.js';
 import { loadEnv } from '../../src/env.js';
 
 const HELLO_BUNDLE_SRC =
@@ -47,7 +48,7 @@ describe('POST /api/plugins/:id/uninstall (I7.9)', () => {
     process.env.LOG_LEVEL = 'fatal';
     process.env.NODE_ENV = 'test';
 
-    app = await buildApp(loadEnv());
+    app = await buildAuthedApp();
     await app.ready();
   });
 

@@ -105,7 +105,7 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import { fetchTransport } from '@/transport/fetch';
+import { authHeaders, fetchTransport } from '@/transport/fetch';
 import {
   connectByProfile,
   deleteProfile,
@@ -700,7 +700,7 @@ export function App() {
     let cancelled = false;
     void installPluginInterceptors({
       listInterceptors: async () => {
-        const res = await fetch('/api/plugins/interceptors');
+        const res = await fetch('/api/plugins/interceptors', { headers: authHeaders() });
         if (!res.ok) return [];
         const body = (await res.json()) as {
           interceptors: Array<{ extensionPoint: ExtensionPoint }>;
@@ -710,7 +710,7 @@ export function App() {
       runInterceptors: async (extensionPoint, contextJson) => {
         const res = await fetch('/api/plugins/interceptors/run', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ extensionPoint, contextJson }),
         });
         if (!res.ok) {
@@ -922,7 +922,7 @@ export function App() {
       try {
         const response = await fetch('/api/export', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({
             sessionId: req.sessionId,
             format: req.format,

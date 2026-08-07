@@ -19,7 +19,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildApp, type App } from '../../src/app.js';
+import { buildAuthedApp } from '../helpers/authed.js';
+import { type App } from '../../src/app.js';
 import { loadEnv } from '../../src/env.js';
 
 const HELLO_BUNDLE_SRC =
@@ -60,7 +61,7 @@ describe('edition mismatch — web refuses desktop-only plugin (I9.5)', () => {
     process.env.LOG_LEVEL = 'fatal';
     process.env.NODE_ENV = 'test';
 
-    app = await buildApp(loadEnv());
+    app = await buildAuthedApp();
     await app.ready();
   });
 

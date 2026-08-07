@@ -115,7 +115,7 @@ export declare function executeBatch(sessionId: string, sql: string): Promise<an
  * HTTP route on top is responsible for chunked transfer to the
  * client.
  */
-export declare function exportQuery(sessionId: string, format: string, csvDelimiter: string, scopeJson: string, includeDdl?: boolean | undefined | null): Promise<string>
+export declare function exportQuery(sessionId: string, format: string, csvDelimiter: string, scopeJson: string, includeDdl?: boolean | undefined | null, maxRows?: number | undefined | null): Promise<string>
 
 export declare function fetchBlob(sessionId: string, blobId: string): Promise<string>
 

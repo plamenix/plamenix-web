@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import * as fbclient from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
+import type { Env } from '../env.js';
 
 const FORMAT_MIME: Record<string, string> = {
   csv: 'text/csv',
@@ -40,7 +41,8 @@ const CHUNK_BYTES = 64 * 1024;
  * 64 KiB chunks via the raw stream so the browser sees the bytes
  * arrive progressively rather than waiting for the full body.
  */
-export async function exportRoute(app: FastifyInstance): Promise<void> {
+export function exportRoute(env: Env) {
+  return async function register(app: FastifyInstance): Promise<void> {
   app.post('/api/export', async (request, reply) => {
     const parsed = exportBody.safeParse(request.body);
     if (!parsed.success) {
@@ -58,6 +60,12 @@ export async function exportRoute(app: FastifyInstance): Promise<void> {
         csvDelimiter,
         JSON.stringify(scope),
         includeDdl,
+        // Bounded at the producer. The chunking below is only the
+        // socket write — the whole export exists as a string here and
+        // again as a Buffer before the first byte leaves, so an
+        // unbounded export is a memory spike in a process that serves
+        // every request.
+        env.EXPORT_MAX_ROWS,
       );
 
       const stamp = new Date()
@@ -102,4 +110,5 @@ export async function exportRoute(app: FastifyInstance): Promise<void> {
       return reply;
     }
   });
+  };
 }

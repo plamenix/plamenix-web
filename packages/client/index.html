@@ -10,6 +10,16 @@
     <title>Plamenix</title>
   </head>
   <body class="antialiased">
+    <!--
+      The server replaces this placeholder with the API token when it
+      serves this file. It travels in an Authorization header rather
+      than a cookie, so the browser never attaches it on its own and
+      CSRF is not something the client has to defend against.
+
+      In `vite dev` nothing rewrites it and the value stays literal; the
+      dev proxy talks to a server started with the same token.
+    -->
+    <meta name="plamenix-api-token" content="__PLAMENIX_API_TOKEN__" />
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

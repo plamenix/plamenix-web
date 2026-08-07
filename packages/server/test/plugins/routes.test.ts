@@ -21,7 +21,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildApp, type App } from '../../src/app.js';
+import { buildAuthedApp } from '../helpers/authed.js';
+import { type App } from '../../src/app.js';
 import { loadEnv } from '../../src/env.js';
 
 const HELLO_BUNDLE_SRC =
@@ -82,7 +83,7 @@ optional = ["clipboard.read"]
     process.env.LOG_LEVEL = 'error';
     process.env.NODE_ENV = 'test';
 
-    app = await buildApp(loadEnv());
+    app = await buildAuthedApp();
     await app.ready();
   });
 

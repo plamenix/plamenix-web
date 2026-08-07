@@ -19,7 +19,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildApp, type App } from '../src/app.js';
+import { buildAuthedApp } from './helpers/authed.js';
+import { type App } from '../src/app.js';
 import { loadEnv } from '../src/env.js';
 
 describe('no request-controlled library loading', () => {
@@ -40,7 +41,7 @@ describe('no request-controlled library loading', () => {
     process.env.NODE_ENV = 'test';
     delete process.env.FBCLIENT_PATH;
 
-    app = await buildApp(loadEnv());
+    app = await buildAuthedApp();
     await app.ready();
   });
 
