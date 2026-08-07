@@ -12,7 +12,6 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   PROFILES_PATH: z.string().default('./profiles.json'),
-  HISTORY_PATH: z.string().default('./history.sqlite'),
   // Directory the boot-time plugin scanner walks. Each direct
   // subdirectory containing `manifest.toml` is loaded + activated.
   // Read-only as far as the host is concerned — plugin bundles live
@@ -23,10 +22,6 @@ const schema = z.object({
   // by the bootstrap; the WASI `fs` capability (wired in I6) preopens
   // this path so plugins cannot reach outside their own scope.
   PLUGIN_DATA_ROOT: z.string().default('./plugin-data'),
-  // SQLite file backing persistent plugin capability grants. The
-  // bootstrap replays this into the napi binding at boot; grant/revoke
-  // routes write here first, then push to the runtime.
-  PLUGIN_GRANTS_PATH: z.string().default('./plugin-grants.sqlite'),
   // Absolute path to the `fbclient` shared library the driver loads in
   // native mode.
   //
@@ -54,9 +49,9 @@ const schema = z.object({
   // address before that.
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(600),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60 * 1000),
-  // Plamenix's own metadata database — the audit log now, history and
-  // grants once they migrate off SQLite. A Firebird file, so it opens
-  // in Plamenix itself.
+  // Plamenix's own metadata database: the audit log, the per-profile
+  // query history, and persistent plugin capability grants. A Firebird
+  // file, so it opens in Plamenix itself.
   METADATA_PATH: z.string().default('./plamenix-meta.fdb'),
   // Extra host names to answer to, beyond loopback. Only set this
   // behind a proxy you control: the Host allowlist is what stops DNS

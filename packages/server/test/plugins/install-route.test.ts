@@ -26,15 +26,11 @@ describe('POST /api/plugins/install (I7.8 stub)', () => {
     workDir = mkdtempSync(join(tmpdir(), 'install-route-test-'));
     const pluginsDir = join(workDir, 'plugins');
     const pluginDataRoot = join(workDir, 'plugin-data');
-    const grantsPath = join(workDir, 'grants.sqlite');
     const profilesPath = join(workDir, 'profiles.json');
-    const historyPath = join(workDir, 'history.sqlite');
     app = await buildAuthedApp({
       PLUGINS_PATH: pluginsDir,
       PLUGIN_DATA_ROOT: pluginDataRoot,
-      PLUGIN_GRANTS_PATH: grantsPath,
       PROFILES_PATH: profilesPath,
-      HISTORY_PATH: historyPath,
       LOG_LEVEL: 'fatal',
     });
     await app.ready();

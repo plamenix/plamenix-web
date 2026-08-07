@@ -52,9 +52,11 @@ export async function buildApp(env: Env) {
     windowMs: env.RATE_LIMIT_WINDOW_MS,
   });
 
-  // The metadata database backs the audit log. Pointed at a file here;
-  // opened lazily on first write, so a problem with it surfaces
-  // alongside a request to attribute it to.
+  // The metadata database backs the audit log, the query history, and
+  // plugin grants. Pointed at a file here; opened lazily on first use,
+  // so a problem with it surfaces alongside a request to attribute it
+  // to. Firebird's embedded engine takes the file exclusively, which is
+  // why this is once per process rather than once per store.
   fbclient.initMeta(env.METADATA_PATH, env.FBCLIENT_PATH ?? undefined);
 
   // Audit writes are fire-and-forget on purpose. An unwritable log is
@@ -127,8 +129,8 @@ export async function buildApp(env: Env) {
   });
 
   const profileStore = new ProfileStore(env.PROFILES_PATH);
-  const historyStore = new HistoryStore(env.HISTORY_PATH);
-  const pluginGrantStore = new PluginGrantStore(env.PLUGIN_GRANTS_PATH);
+  const historyStore = new HistoryStore();
+  const pluginGrantStore = new PluginGrantStore();
 
   await app.register(pingRoute);
   await app.register(connectRoute(env));

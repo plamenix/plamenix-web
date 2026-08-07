@@ -1,94 +1,36 @@
 /**
- * Per-plugin grant store backed by a single SQLite file.
+ * Per-plugin capability grants, in Plamenix's own Firebird database.
  *
- * The napi binding (`@plamenix/native`) holds the
- * **runtime** grant set in memory — capability checks at the host-
- * import layer read from there. The server's SQLite store is the
- * **authority**: grants persist across restarts, the bootstrap
- * replays them into the napi binding at boot, and the grant/revoke
- * routes write here first then push to the binding.
+ * The napi binding (`@plamenix/native`) holds the **runtime** grant set
+ * in memory — capability checks at the host-import layer read from
+ * there. This store is the **authority**: grants persist across
+ * restarts, the bootstrap replays them into the runtime at boot, and
+ * the grant/revoke routes write here first then push to the binding.
  *
- * Mirrors the desktop edition's `~/.config/Plamenix/plugin_grants.json`
- * with a SQLite schema instead of a flat file — multi-tenant servers
- * need transactional updates + concurrent read safety, which the JSON
- * file pattern does not provide.
- *
- * Schema:
+ * This was a SQLite file, and the same table existed again in Rust in
+ * the desktop shell. Both editions now go through `plamenix-meta`, in
+ * the engine this IDE is for. Schema:
  *
  * ```sql
- * CREATE TABLE plugin_grants (
- *   plugin_id  TEXT NOT NULL,
- *   permission TEXT NOT NULL,
- *   granted_at INTEGER NOT NULL,           -- epoch ms
- *   PRIMARY KEY (plugin_id, permission)
+ * CREATE TABLE PLUGIN_GRANTS (
+ *   PLUGIN_ID  VARCHAR(255) NOT NULL,
+ *   PERMISSION VARCHAR(512) NOT NULL,
+ *   GRANTED_AT BIGINT NOT NULL,           -- epoch ms
+ *   PRIMARY KEY (PLUGIN_ID, PERMISSION)
  * );
  * ```
+ *
+ * The methods are `async` because the driver is. The store holds no
+ * state: the metadata database is opened once per process by
+ * `initMeta`.
  */
 
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import Database from 'better-sqlite3';
-import type { Database as DatabaseType, Statement } from 'better-sqlite3';
-
-export interface PluginGrant {
-  pluginId: string;
-  permission: string;
-  grantedAt: number;
-}
-
-interface GrantRow {
-  plugin_id: string;
-  permission: string;
-  granted_at: number;
-}
+import * as native from '@plamenix/native';
 
 export class PluginGrantStore {
-  private readonly db: DatabaseType;
-  private readonly insertStmt: Statement;
-  private readonly deleteStmt: Statement;
-  private readonly listForPluginStmt: Statement;
-  private readonly listAllStmt: Statement;
-  private readonly purgePluginStmt: Statement;
-
-  constructor(path: string) {
-    mkdirSync(dirname(path), { recursive: true });
-    this.db = new Database(path);
-    this.db.pragma('journal_mode = WAL');
-    this.db.exec(
-      `CREATE TABLE IF NOT EXISTS plugin_grants (
-         plugin_id  TEXT NOT NULL,
-         permission TEXT NOT NULL,
-         granted_at INTEGER NOT NULL,
-         PRIMARY KEY (plugin_id, permission)
-       );
-       CREATE INDEX IF NOT EXISTS idx_plugin_grants_plugin
-         ON plugin_grants(plugin_id);`,
-    );
-    // `INSERT OR REPLACE` so re-granting bumps the timestamp without
-    // surfacing a unique-constraint violation. Idempotent grants are
-    // a feature: install dialogs may re-prompt across updates.
-    this.insertStmt = this.db.prepare(
-      `INSERT OR REPLACE INTO plugin_grants (plugin_id, permission, granted_at)
-       VALUES (?, ?, ?)`,
-    );
-    this.deleteStmt = this.db.prepare(
-      `DELETE FROM plugin_grants WHERE plugin_id = ? AND permission = ?`,
-    );
-    this.listForPluginStmt = this.db.prepare(
-      `SELECT plugin_id, permission, granted_at FROM plugin_grants
-        WHERE plugin_id = ? ORDER BY granted_at ASC`,
-    );
-    this.listAllStmt = this.db.prepare(
-      `SELECT plugin_id, permission, granted_at FROM plugin_grants
-        ORDER BY plugin_id, granted_at ASC`,
-    );
-    this.purgePluginStmt = this.db.prepare(
-      `DELETE FROM plugin_grants WHERE plugin_id = ?`,
-    );
-  }
-
   /**
-   * Persist a grant. Idempotent — re-granting refreshes `grantedAt`.
+   * Persist a grant. Idempotent — re-granting is a no-op rather than a
+   * primary-key violation.
    *
    * `declared` is the plugin manifest's required and optional
    * capabilities. It is required rather than optional so the check
@@ -99,53 +41,37 @@ export class PluginGrantStore {
    *
    * @throws When `permission` is outside `declared`.
    */
-  add(pluginId: string, permission: string, declared: readonly string[]): void {
+  async add(pluginId: string, permission: string, declared: readonly string[]): Promise<void> {
     if (!declared.includes(permission)) {
       throw new Error(
         `plugin \`${pluginId}\` does not declare \`${permission}\`; ` +
           'a capability can only be granted when its manifest asks for it',
       );
     }
-    this.insertStmt.run(pluginId, permission, Date.now());
+    await native.grantAdd(pluginId, permission);
   }
 
   /** Remove a single grant. No-op when the row is absent. */
-  remove(pluginId: string, permission: string): void {
-    this.deleteStmt.run(pluginId, permission);
+  async remove(pluginId: string, permission: string): Promise<void> {
+    await native.grantRemove(pluginId, permission);
   }
 
-  /** All grants for one plugin, ordered oldest-first. */
-  list(pluginId: string): PluginGrant[] {
-    return (this.listForPluginStmt.all(pluginId) as GrantRow[]).map(rowToGrant);
+  /** Capabilities granted to one plugin. */
+  async list(pluginId: string): Promise<string[]> {
+    return native.grantList(pluginId);
   }
 
-  /** All grants across all plugins, grouped for fast bulk replay. */
-  listAll(): Map<string, string[]> {
-    const grouped = new Map<string, string[]>();
-    for (const row of this.listAllStmt.all() as GrantRow[]) {
-      const existing = grouped.get(row.plugin_id);
-      if (existing) {
-        existing.push(row.permission);
-      } else {
-        grouped.set(row.plugin_id, [row.permission]);
-      }
-    }
-    return grouped;
+  /** Every grant, by plugin, for the boot-time replay. */
+  async listAll(): Promise<Map<string, string[]>> {
+    const grouped = (await native.grantListAll()) as Record<string, string[]>;
+    return new Map(Object.entries(grouped));
   }
 
   /**
    * Remove every grant for a plugin. Used on uninstall (Section I7)
    * so re-installing the same plugin starts from a clean grant set.
    */
-  purgePlugin(pluginId: string): void {
-    this.purgePluginStmt.run(pluginId);
+  async purgePlugin(pluginId: string): Promise<void> {
+    await native.grantPurgePlugin(pluginId);
   }
-}
-
-function rowToGrant(row: GrantRow): PluginGrant {
-  return {
-    pluginId: row.plugin_id,
-    permission: row.permission,
-    grantedAt: row.granted_at,
-  };
 }

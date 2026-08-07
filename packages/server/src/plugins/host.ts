@@ -26,7 +26,7 @@ export interface BootstrapResult {
   /** Plugins that loaded and activated successfully. */
   active: ActivatedPluginInfo[];
   /** Per-bundle failures, keyed by bundle directory name. */
-  failures: Array<{ bundleDir: string; error: string }>;
+  failures: { bundleDir: string; error: string }[];
 }
 
 export interface BootstrapOptions {
@@ -35,7 +35,7 @@ export interface BootstrapOptions {
   /** Root for per-plugin writable storage; `<root>/<plugin-id>/data/`
    *  is created at activation time. */
   pluginDataRoot: string;
-  /** SQLite-backed persistent grant store. Replayed into the napi
+  /** Persistent grant store, in the metadata database. Replayed into the napi
    *  binding's in-memory set after each plugin activates. */
   grantStore: PluginGrantStore;
   /** Logger to surface progress + per-plugin failures. */
@@ -58,7 +58,7 @@ export async function bootstrapPlugins(
   pluginHost.initTracing();
 
   const pluginsDir = path.resolve(options.pluginsDir);
-  const failures: Array<{ bundleDir: string; error: string }> = [];
+  const failures: { bundleDir: string; error: string }[] = [];
   const active: ActivatedPluginInfo[] = [];
 
   const entries = await readPluginDirs(pluginsDir, options.log);
@@ -103,15 +103,15 @@ export async function bootstrapPlugins(
         options.log.warn('plugin activation failed', { bundleDir, reason });
         continue;
       }
-      // Replay persisted grants from the SQLite authority into the
+      // Replay persisted grants from the metadata database into the
       // napi binding's in-memory cache so the activated plugin sees
       // its previously-granted capabilities without re-prompting the
       // user. Per-grant failures are non-fatal — they suggest a
       // capability grammar drift (e.g. plugin updated its required
       // set) and the operator should reconcile via the Permissions
       // panel (Section I7).
-      const persisted = options.grantStore.list(activated.id);
-      for (const { permission } of persisted) {
+      const persisted = await options.grantStore.list(activated.id);
+      for (const permission of persisted) {
         try {
           await pluginHost.grantPermission(activated.id, permission);
         } catch (err) {

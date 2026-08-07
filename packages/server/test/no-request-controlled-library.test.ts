@@ -33,10 +33,8 @@ describe('no request-controlled library loading', () => {
     profilesPath = join(workDir, 'profiles.json');
 
     process.env.PROFILES_PATH = profilesPath;
-    process.env.HISTORY_PATH = join(workDir, 'history.sqlite');
     process.env.PLUGINS_PATH = join(workDir, 'plugins');
     process.env.PLUGIN_DATA_ROOT = join(workDir, 'plugin-data');
-    process.env.PLUGIN_GRANTS_PATH = join(workDir, 'plugin-grants.sqlite');
     process.env.LOG_LEVEL = 'error';
     process.env.NODE_ENV = 'test';
     delete process.env.FBCLIENT_PATH;

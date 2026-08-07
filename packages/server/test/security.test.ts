@@ -36,10 +36,8 @@ describe('security gate', () => {
         LOG_LEVEL: 'error',
         AUTH_TOKEN: TOKEN,
         PROFILES_PATH: join(workDir, 'profiles.json'),
-        HISTORY_PATH: join(workDir, 'history.sqlite'),
         PLUGINS_PATH: join(workDir, 'plugins'),
         PLUGIN_DATA_ROOT: join(workDir, 'plugin-data'),
-        PLUGIN_GRANTS_PATH: join(workDir, 'grants.sqlite'),
       } as NodeJS.ProcessEnv),
     );
     await app.ready();

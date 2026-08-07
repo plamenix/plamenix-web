@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import * as fbclient from '@plamenix/native';
 import * as pluginHost from '@plamenix/native';
@@ -42,6 +42,7 @@ export function executeRoute(history: HistoryStore) {
         if (profileId) {
           recordOutcomeBatch(
             history,
+            app.log,
             profileId,
             parsed.data.sql,
             startedAt,
@@ -67,15 +68,18 @@ export function executeRoute(history: HistoryStore) {
         return outcomes;
       } catch (err) {
         if (profileId) {
-          history.record({
-            profileId,
-            sql: parsed.data.sql,
-            durationMs: Date.now() - startedAt,
-            status: 'err',
-            error: err instanceof Error ? err.message : String(err),
-            rowCount: null,
-            limit: historyLimit,
-          });
+          fireAndForget(
+            history.record({
+              profileId,
+              sql: parsed.data.sql,
+              durationMs: Date.now() - startedAt,
+              status: 'err',
+              error: err instanceof Error ? err.message : String(err),
+              rowCount: null,
+              limit: historyLimit,
+            }),
+            app.log,
+          );
         }
         app.log.warn({ err }, 'execute failed');
         return reply.code(502).send({
@@ -227,6 +231,7 @@ interface StatementOutcomeShape {
  *  of how many statements the batch contained. */
 function recordOutcomeBatch(
   history: HistoryStore,
+  log: FastifyBaseLogger,
   profileId: string,
   sql: string,
   startedAt: number,
@@ -234,33 +239,30 @@ function recordOutcomeBatch(
   limit: number | null,
 ): void {
   const durationMs = Date.now() - startedAt;
+  const base = { profileId, sql, durationMs, limit };
+
   if (!Array.isArray(outcomes) || outcomes.length === 0) {
-    history.record({
-      profileId,
-      sql,
-      durationMs,
-      status: 'ok',
-      error: null,
-      rowCount: null,
-      limit,
-    });
+    fireAndForget(
+      history.record({ ...base, status: 'ok', error: null, rowCount: null }),
+      log,
+    );
     return;
   }
-  const failed = (outcomes as StatementOutcomeShape[]).find(
-    (o) => o?.status === 'err',
-  );
+
+  const failed = (outcomes as StatementOutcomeShape[]).find((o) => o?.status === 'err');
   if (failed) {
-    history.record({
-      profileId,
-      sql,
-      durationMs,
-      status: 'err',
-      error: failed.error ?? 'execution failed',
-      rowCount: null,
-      limit,
-    });
+    fireAndForget(
+      history.record({
+        ...base,
+        status: 'err',
+        error: failed.error ?? 'execution failed',
+        rowCount: null,
+      }),
+      log,
+    );
     return;
   }
+
   const last = outcomes[outcomes.length - 1] as StatementOutcomeShape;
   let rowCount: number | null = null;
   if (last?.result?.Rows) {
@@ -268,13 +270,19 @@ function recordOutcomeBatch(
   } else if (last?.result?.Affected) {
     rowCount = last.result.Affected.rows ?? null;
   }
-  history.record({
-    profileId,
-    sql,
-    durationMs,
-    status: 'ok',
-    error: null,
-    rowCount,
-    limit,
+  fireAndForget(history.record({ ...base, status: 'ok', error: null, rowCount }), log);
+}
+
+/** Lets a history write finish on its own.
+ *
+ *  History is a convenience. The statement already ran and the user
+ *  already has their rows, so a failed history write is worth a log line
+ *  and is not worth turning a successful query into an error — nor worth
+ *  making the response wait on a second database round trip. The audit
+ *  log is fire-and-forget for the same reason and the opposite stakes.
+ */
+function fireAndForget(write: Promise<void>, log: FastifyBaseLogger): void {
+  void write.catch((err: unknown) => {
+    log.warn({ err }, 'could not record query history');
   });
 }

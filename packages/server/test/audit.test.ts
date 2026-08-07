@@ -53,10 +53,8 @@ describe.skipIf(!existsSync(FBCLIENT))('audit log', () => {
         FBCLIENT_PATH: FBCLIENT,
         METADATA_PATH: join(workDir, 'meta.fdb'),
         PROFILES_PATH: join(workDir, 'profiles.json'),
-        HISTORY_PATH: join(workDir, 'history.sqlite'),
         PLUGINS_PATH: join(workDir, 'plugins'),
         PLUGIN_DATA_ROOT: join(workDir, 'plugin-data'),
-        PLUGIN_GRANTS_PATH: join(workDir, 'grants.sqlite'),
       } as NodeJS.ProcessEnv),
     );
     await app.ready();

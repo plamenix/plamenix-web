@@ -145,11 +145,111 @@ export declare function exportQuery(sessionId: string, format: string, csvDelimi
 export declare function fetchBlob(sessionId: string, blobId: string): Promise<string>
 
 /**
+ * Records a capability grant. Re-granting is a no-op.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function grantAdd(pluginId: string, permission: string): Promise<void>
+
+/**
+ * Capabilities granted to one plugin.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function grantList(pluginId: string): Promise<Array<string>>
+
+/**
+ * Every grant, by plugin — replayed into the plugin host at boot so a
+ * plugin's approved capabilities survive a restart.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function grantListAll(): Promise<any>
+
+/**
  * Persists an optional-permission grant on the plugin's registry
  * entry. No-op when already granted. Returns the updated activated
  * view so callers can refresh their cached UI state.
  */
 export declare function grantPermission(pluginId: string, permission: string): Promise<void>
+
+/**
+ * Drops every grant for one plugin, for uninstall.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function grantPurgePlugin(pluginId: string): Promise<void>
+
+/**
+ * Withdraws a grant. Revoking one never granted is a no-op.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function grantRemove(pluginId: string, permission: string): Promise<void>
+
+/**
+ * Removes every entry for one profile, returning how many went.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function historyClear(profileId: string): Promise<number>
+
+/**
+ * Deletes one entry.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function historyDelete(id: number): Promise<boolean>
+
+/**
+ * Deletes several entries.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function historyDeleteMany(ids: Array<number>): Promise<number>
+
+/**
+ * Most recent statements for one profile, newest first.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function historyList(profileId: string, limit: number): Promise<any>
+
+/**
+ * Records one executed statement, then trims the profile to `limit`.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function historyRecord(profileId: string, sql: string, executedAt: number, durationMs: number, status: string, error?: string | undefined | null, rowsReturned?: number | undefined | null, label?: string | undefined | null, limit?: number | undefined | null): Promise<void>
+
+/**
+ * Sets or clears one entry's label.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function historySetLabel(id: number, label?: string | undefined | null): Promise<boolean>
 
 /**
  * Points the metadata store at a file. Call once, before anything else

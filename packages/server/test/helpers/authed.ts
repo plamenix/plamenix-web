@@ -10,8 +10,31 @@
  * path. `test/security.test.ts` does that deliberately, with a raw app.
  */
 
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { buildApp, type App } from '../../src/app.js';
 import { loadEnv } from '../../src/env.js';
+
+/** The full Firebird install both editions ship. */
+export const FBCLIENT = resolve(
+  import.meta.dirname,
+  '../../../../../plamenix-desktop/resources/fbclient/v50/Resources/lib/libfbclient.dylib',
+);
+
+/** Is the metadata database reachable in this checkout? */
+export const HAS_FIREBIRD = existsSync(FBCLIENT);
+
+/**
+ * One metadata database per test process.
+ *
+ * Firebird's embedded engine takes the file exclusively and the napi
+ * binding opens it once per process, so a shared default path would
+ * have test files fighting over one file and losing to whichever got
+ * there first. Vitest isolates each test file into its own process,
+ * which makes one temp file per process exactly one per test file.
+ */
+const META_DIR = mkdtempSync(join(tmpdir(), 'plamenix-server-test-'));
 
 /** Fixed so failures are reproducible. Long enough to pass the
  *  minimum-length check that refuses a token worth guessing. */
@@ -33,6 +56,8 @@ export async function buildAuthedApp(overrides: NodeJS.ProcessEnv = {}): Promise
       NODE_ENV: 'test',
       LOG_LEVEL: 'error',
       AUTH_TOKEN: TEST_TOKEN,
+      METADATA_PATH: join(META_DIR, 'meta.fdb'),
+      ...(HAS_FIREBIRD ? { FBCLIENT_PATH: FBCLIENT } : {}),
       ...process.env,
       ...overrides,
     } as NodeJS.ProcessEnv),

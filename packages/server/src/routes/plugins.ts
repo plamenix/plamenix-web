@@ -74,7 +74,7 @@ const INSTALL_REQUEST_BODY_LIMIT = Math.ceil(PLX_MAX_BYTES * 1.4);
  * in `../plugins/host.ts`; these routes are the request/response
  * surface the React shell calls into.
  *
- * Grant/revoke routes persist via [`PluginGrantStore`] (SQLite-backed
+ * Grant/revoke routes persist via [`PluginGrantStore`] (Firebird-backed
  * authority) **before** pushing the change to the napi binding's
  * in-memory cache, so a server restart mid-operation leaves the
  * authority and the runtime in sync.
@@ -249,8 +249,8 @@ export function pluginsRoute(options: PluginsRouteOptions) {
         // the reloaded plugin sees the same granted set the user
         // already approved. Failures (capability grammar drift since
         // the grant was persisted) logged but not fatal.
-        const persisted = grantStore.list(parsed.data.id);
-        for (const { permission } of persisted) {
+        const persisted = await grantStore.list(parsed.data.id);
+        for (const permission of persisted) {
           try {
             await pluginHost.grantPermission(parsed.data.id, permission);
           } catch (err) {
@@ -317,7 +317,7 @@ export function pluginsRoute(options: PluginsRouteOptions) {
         // state. The opposite ordering would risk losing a grant if
         // the server crashed between the napi push and the SQLite
         // commit.
-        grantStore.add(idParsed.data.id, bodyParsed.data.permission, declared);
+        await grantStore.add(idParsed.data.id, bodyParsed.data.permission, declared);
         await pluginHost.grantPermission(idParsed.data.id, bodyParsed.data.permission);
         const active = await pluginHost.listActive();
         return { plugins: active };
@@ -452,7 +452,7 @@ export function pluginsRoute(options: PluginsRouteOptions) {
       }
 
       // Step 2 — purge grants.
-      grantStore.purgePlugin(pluginId);
+      await grantStore.purgePlugin(pluginId);
 
       // Step 3 — remove bundle dir.
       try {
@@ -513,7 +513,7 @@ export function pluginsRoute(options: PluginsRouteOptions) {
         // capability the authority no longer holds, but the next boot
         // reconciles by replaying only the persisted grants (the
         // revoked one is absent, so it falls out).
-        grantStore.remove(idParsed.data.id, bodyParsed.data.permission);
+        await grantStore.remove(idParsed.data.id, bodyParsed.data.permission);
         await pluginHost.revokePermission(idParsed.data.id, bodyParsed.data.permission);
         const active = await pluginHost.listActive();
         return { plugins: active };

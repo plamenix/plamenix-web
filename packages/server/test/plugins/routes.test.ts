@@ -77,9 +77,7 @@ optional = ["clipboard.read"]
 
     process.env.PLUGINS_PATH = pluginsDir;
     process.env.PLUGIN_DATA_ROOT = join(workDir, 'plugin-data');
-    process.env.PLUGIN_GRANTS_PATH = join(workDir, 'plugin-grants.sqlite');
     process.env.PROFILES_PATH = join(workDir, 'profiles.json');
-    process.env.HISTORY_PATH = join(workDir, 'history.sqlite');
     process.env.LOG_LEVEL = 'error';
     process.env.NODE_ENV = 'test';
 
