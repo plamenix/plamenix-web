@@ -28,6 +28,7 @@ plamenix-types = { path = "../../../plamenix-core/crates/plamenix-types" }
 plamenix-db = { path = "../../../plamenix-core/crates/plamenix-db", default-features = false, features = ["pure-rust", "native"] }
 plamenix-tracing = { path = "../../../plamenix-core/crates/plamenix-tracing", features = ["otlp"] }
 plamenix-plugin-host = { path = "../../../plamenix-core/crates/plamenix-plugin-host" }
+plamenix-meta = { path = "../../../plamenix-core/crates/plamenix-meta" }
 plamenix-secrets = { path = "../../../plamenix-core/crates/plamenix-secrets" }
 semver = "1"
 async-trait = "0.1"

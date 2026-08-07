@@ -18,7 +18,8 @@ import { PluginGrantStore } from './plugins/grants.js';
 import type { Env } from './env.js';
 import * as fbclient from '@plamenix/native';
 import { installSecurityGate } from './security/gate.js';
-import { resolveToken } from './security/token.js';
+import { resolveTokens } from './security/token.js';
+import { RateLimiter } from './security/rate-limit.js';
 import { reapIdleSessions, sessionStore } from './sessions/store.js';
 
 // `Fastify(...)` returns a richer generic than the bare `FastifyInstance`
@@ -45,10 +46,73 @@ export async function buildApp(env: Env) {
   // Before any route. Host allowlist closes DNS rebinding, which
   // loopback binding does not; the bearer token closes other processes
   // on the same machine, which loopback also does not.
-  const auth = resolveToken(env.AUTH_TOKEN);
-  installSecurityGate(app, { token: auth.token, allowedHosts: env.ALLOWED_HOSTS });
-  app.decorate('authToken', auth.token);
-  app.decorate('authTokenSource', auth.source);
+  const auth = resolveTokens(env.AUTH_TOKENS, env.AUTH_TOKEN);
+  const limiter = new RateLimiter({
+    max: env.RATE_LIMIT_MAX,
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+  });
+
+  // The metadata database backs the audit log. Pointed at a file here;
+  // opened lazily on first write, so a problem with it surfaces
+  // alongside a request to attribute it to.
+  fbclient.initMeta(env.METADATA_PATH, env.FBCLIENT_PATH ?? undefined);
+
+  // Audit writes are fire-and-forget on purpose. An unwritable log is
+  // worth knowing about and is not worth refusing to serve over — the
+  // alternative turns a full disk into a denial of service.
+  const audit = (entry: {
+    action: string;
+    outcome: 'allowed' | 'refused';
+    actor?: string | undefined;
+    remoteAddr?: string | undefined;
+    target?: string | undefined;
+    detail?: string | undefined;
+  }): void => {
+    void fbclient
+      .auditRecord(
+        entry.action,
+        entry.outcome,
+        entry.actor ?? null,
+        entry.remoteAddr ?? null,
+        entry.target ?? null,
+        entry.detail ?? null,
+      )
+      .catch((err: unknown) => {
+        app.log.warn({ err, action: entry.action }, 'could not write an audit entry');
+      });
+  };
+
+  installSecurityGate(app, {
+    tokens: auth.tokens,
+    allowedHosts: env.ALLOWED_HOSTS,
+    limiter,
+    audit,
+  });
+
+  // Records what an authenticated caller actually did, not only what
+  // was refused. A log of refusals alone answers "was anyone turned
+  // away" and not "who dropped that table".
+  app.addHook('onResponse', async (request, reply) => {
+    if (!request.url.startsWith('/api/')) return;
+    if (request.method === 'GET' || request.method === 'HEAD') return;
+    if (request.actor === undefined) return;
+    audit({
+      action: `http.${request.method.toLowerCase()}`,
+      outcome: reply.statusCode < 400 ? 'allowed' : 'refused',
+      actor: request.actor,
+      remoteAddr: request.ip,
+      target: request.url.split('?')[0] ?? request.url,
+      detail: JSON.stringify({ status: reply.statusCode }),
+    });
+  });
+
+  // Expired windows would otherwise accumulate one entry per distinct
+  // source address, forever.
+  const limiterSweep = setInterval(() => limiter.sweep(), env.RATE_LIMIT_WINDOW_MS);
+  limiterSweep.unref();
+  app.addHook('onClose', async () => {
+    clearInterval(limiterSweep);
+  });
 
   // Keeps a session alive for as long as it is being used. Done once
   // here rather than at each of the six routes that name a session: a
@@ -103,7 +167,9 @@ export async function buildApp(env: Env) {
 
   // Last, so its catch-all not-found handler does not shadow the API.
   if (env.CLIENT_DIST !== undefined && env.CLIENT_DIST !== '') {
-    await app.register(spaRoute({ clientDist: env.CLIENT_DIST, token: auth.token }));
+    await app.register(
+      spaRoute({ clientDist: env.CLIENT_DIST, token: auth.tokens[0]?.value ?? '' }),
+    );
   }
 
   await bootstrapPlugins({

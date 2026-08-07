@@ -18,9 +18,9 @@ import {
   bearerToken,
   isAllowedHost,
   isAllowedOrigin,
-  tokensMatch,
 } from '../src/security/gate.js';
-import { resolveToken } from '../src/security/token.js';
+import { DEFAULT_ACTOR, actorFor, resolveTokens } from '../src/security/token.js';
+import { RateLimiter } from '../src/security/rate-limit.js';
 
 const TOKEN = 'security-test-token-0123456789abc';
 
@@ -177,35 +177,108 @@ describe('token handling', () => {
     expect(bearerToken(undefined)).toBeNull();
   });
 
-  it('compares tokens without short-circuiting on the first difference', () => {
-    expect(tokensMatch('abcdef', 'abcdef')).toBe(true);
-    expect(tokensMatch('abcdef', 'abcdeg')).toBe(false);
-    expect(tokensMatch('abc', 'abcdef')).toBe(false);
-  });
-
   it('generates a token when none is configured', () => {
     // There is no unauthenticated mode. An operator who forgets gets a
     // generated token, not an open server.
-    const resolved = resolveToken(undefined);
+    const resolved = resolveTokens(undefined, undefined);
     expect(resolved.source).toBe('generated');
-    expect(resolved.token.length).toBeGreaterThan(20);
+    expect(resolved.tokens).toHaveLength(1);
+    expect(resolved.tokens[0]!.name).toBe(DEFAULT_ACTOR);
+    expect(resolved.tokens[0]!.value.length).toBeGreaterThan(20);
   });
 
   it('generates a different token each time', () => {
-    expect(resolveToken(undefined).token).not.toBe(resolveToken(undefined).token);
+    expect(resolveTokens(undefined, undefined).tokens[0]!.value).not.toBe(
+      resolveTokens(undefined, undefined).tokens[0]!.value,
+    );
   });
 
   it('refuses a configured token too short to be worth having', () => {
-    // Refused rather than warned about. A warning is read once and then
+    // Refused rather than warned about: a warning is read once and then
     // scrolls away.
-    expect(() => resolveToken('short')).toThrow();
+    expect(() => resolveTokens(undefined, 'short')).toThrow();
+    expect(() => resolveTokens('alice:short', undefined)).toThrow();
   });
 
-  it('keeps a configured token of adequate length', () => {
-    const resolved = resolveToken('a-long-enough-configured-token');
-    expect(resolved).toEqual({
-      token: 'a-long-enough-configured-token',
-      source: 'configured',
-    });
+  it('names an unnamed token so the audit log has an actor', () => {
+    const resolved = resolveTokens(undefined, 'a-long-enough-configured-token');
+    expect(resolved.tokens).toEqual([
+      { name: DEFAULT_ACTOR, value: 'a-long-enough-configured-token' },
+    ]);
+  });
+
+  it('parses several named tokens', () => {
+    const resolved = resolveTokens(
+      'alice:alice-token-0123456789, bob:bob-token-0123456789',
+      undefined,
+    );
+    expect(resolved.tokens.map((t) => t.name)).toEqual(['alice', 'bob']);
+  });
+
+  it('refuses duplicate names', () => {
+    // Two operators sharing one name would make the audit log
+    // unanswerable about who did something.
+    expect(() =>
+      resolveTokens('alice:token-one-0123456789,alice:token-two-0123456789', undefined),
+    ).toThrow(/unique/);
+  });
+
+  it('refuses a malformed entry rather than skipping it', () => {
+    // Skipping would silently drop a credential the operator believes
+    // is live.
+    expect(() => resolveTokens('no-colon-here-0123456789', undefined)).toThrow();
+  });
+
+  it('identifies which operator a token belongs to', () => {
+    const tokens = [
+      { name: 'alice', value: 'alice-token-0123456789' },
+      { name: 'bob', value: 'bob-token-0123456789' },
+    ];
+    expect(actorFor('bob-token-0123456789', tokens)).toBe('bob');
+    expect(actorFor('nobody-token-012345678', tokens)).toBeNull();
+  });
+});
+
+describe('rate limiting', () => {
+  it('permits up to the limit and refuses past it', () => {
+    const limiter = new RateLimiter({ max: 3, windowMs: 1000 });
+    expect(limiter.check('alice', 0).allowed).toBe(true);
+    expect(limiter.check('alice', 1).allowed).toBe(true);
+    expect(limiter.check('alice', 2).allowed).toBe(true);
+    expect(limiter.check('alice', 3).allowed).toBe(false);
+  });
+
+  it('keeps one actor from spending another actor budget', () => {
+    // A global counter would let one bad client lock everyone out,
+    // which is the failure the limiter exists to prevent.
+    const limiter = new RateLimiter({ max: 2, windowMs: 1000 });
+    limiter.check('alice', 0);
+    limiter.check('alice', 0);
+    expect(limiter.check('alice', 0).allowed).toBe(false);
+    expect(limiter.check('bob', 0).allowed).toBe(true);
+  });
+
+  it('starts a fresh window once the old one elapses', () => {
+    const limiter = new RateLimiter({ max: 1, windowMs: 1000 });
+    expect(limiter.check('alice', 0).allowed).toBe(true);
+    expect(limiter.check('alice', 500).allowed).toBe(false);
+    expect(limiter.check('alice', 1000).allowed).toBe(true);
+  });
+
+  it('reports when the window resets so a Retry-After can be sent', () => {
+    const limiter = new RateLimiter({ max: 1, windowMs: 1000 });
+    limiter.check('alice', 0);
+    expect(limiter.check('alice', 100).resetAt).toBe(1000);
+  });
+
+  it('sweeps expired windows so the map does not grow forever', () => {
+    // One entry per distinct source address, otherwise — a slow leak an
+    // attacker can drive.
+    const limiter = new RateLimiter({ max: 5, windowMs: 1000 });
+    limiter.check('a', 0);
+    limiter.check('b', 0);
+    expect(limiter.size()).toBe(2);
+    expect(limiter.sweep(2000)).toBe(2);
+    expect(limiter.size()).toBe(0);
   });
 });

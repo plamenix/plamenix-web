@@ -45,6 +45,19 @@ const schema = z.object({
   // unauthenticated mode, because a control that switches itself off by
   // omission is off everywhere nobody looked.
   AUTH_TOKEN: z.string().optional(),
+  // `name:token,name2:token2`. Named so the audit log records which
+  // operator acted rather than only that someone did, and so one
+  // credential can be revoked without rotating the rest. Identity, not
+  // isolation — every token reaches the same data.
+  AUTH_TOKENS: z.string().optional(),
+  // Requests per window, per actor once authenticated and per source
+  // address before that.
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(600),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60 * 1000),
+  // Plamenix's own metadata database — the audit log now, history and
+  // grants once they migrate off SQLite. A Firebird file, so it opens
+  // in Plamenix itself.
+  METADATA_PATH: z.string().default('./plamenix-meta.fdb'),
   // Extra host names to answer to, beyond loopback. Only set this
   // behind a proxy you control: the Host allowlist is what stops DNS
   // rebinding, and a wildcard here removes that protection.

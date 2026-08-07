@@ -577,6 +577,8 @@ if (!nativeBinding) {
 
 module.exports = nativeBinding
 module.exports.activatePlugin = nativeBinding.activatePlugin
+module.exports.auditRecent = nativeBinding.auditRecent
+module.exports.auditRecord = nativeBinding.auditRecord
 module.exports.beginTransaction = nativeBinding.beginTransaction
 module.exports.clearCallContext = nativeBinding.clearCallContext
 module.exports.close = nativeBinding.close
@@ -592,6 +594,7 @@ module.exports.executeBatch = nativeBinding.executeBatch
 module.exports.exportQuery = nativeBinding.exportQuery
 module.exports.fetchBlob = nativeBinding.fetchBlob
 module.exports.grantPermission = nativeBinding.grantPermission
+module.exports.initMeta = nativeBinding.initMeta
 module.exports.initTracing = nativeBinding.initTracing
 module.exports.listActive = nativeBinding.listActive
 module.exports.listAliases = nativeBinding.listAliases

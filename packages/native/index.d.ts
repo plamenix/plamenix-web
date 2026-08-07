@@ -28,6 +28,31 @@ export interface ActivationInfo {
 }
 
 /**
+ * Reads recent audit entries, newest first.
+ *
+ * A log nobody can read is a log nobody keeps. This is what makes the
+ * table answerable without opening the file in another tool — though
+ * it is a Firebird database, so opening it in Plamenix works too.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached.
+ */
+export declare function auditRecent(limit?: number | undefined | null): Promise<any>
+
+/**
+ * Appends one entry to the audit log.
+ *
+ * # Errors
+ *
+ * When the metadata database cannot be reached. Callers on a request
+ * path should log and continue: an unwritable audit log is worth
+ * knowing about and is not worth refusing to serve over, or a full
+ * disk becomes a denial of service.
+ */
+export declare function auditRecord(action: string, outcome: string, actor?: string | undefined | null, remoteAddr?: string | undefined | null, target?: string | undefined | null, detail?: string | undefined | null): Promise<void>
+
+/**
  * Opens an explicit transaction. Manual mode opens one on the first
  * statement, so this is only for starting one deliberately.
  */
@@ -125,6 +150,16 @@ export declare function fetchBlob(sessionId: string, blobId: string): Promise<st
  * view so callers can refresh their cached UI state.
  */
 export declare function grantPermission(pluginId: string, permission: string): Promise<void>
+
+/**
+ * Points the metadata store at a file. Call once, before anything else
+ * here.
+ *
+ * Separate from opening so a failure to open surfaces on the first
+ * real use with the reason attached, rather than at import time where
+ * there is no request to attribute it to.
+ */
+export declare function initMeta(path: string, fbclientPath?: string | undefined | null): void
 
 /**
  * Initialises the global `tracing` subscriber for the Node process.

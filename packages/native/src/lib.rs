@@ -27,6 +27,7 @@
 //!   driver in `db`. This is the join the split made impossible.
 
 pub mod db;
+pub mod meta;
 pub mod plugins;
 pub mod services;
 
