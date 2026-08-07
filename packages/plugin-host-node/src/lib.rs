@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use plamenix_plugin_host::{
-    ActivationOutcome, DispatchOutcome, EpochTicker, EventBus, FailureKind, HostState,
-    InstanceRegistry, LogSink, Permission, PluginError, PluginHost, SessionSlot, StagedPlugin,
+    ActivationOutcome, DispatchOutcome, EpochTicker, EventBus, ExtensionPoint, FailureKind,
+    HostState, InstanceRegistry, InterceptorRegistration, InterceptorRegistry, LogSink, Permission, PluginError, PluginHost, SessionSlot, StagedPlugin,
     Supervisor, activate_into_registry, dispatch_event_supervised, load,
 };
 use plamenix_tracing::TracingGuard;
@@ -73,6 +73,12 @@ fn supervisor() -> &'static Supervisor {
 fn instances() -> &'static InstanceRegistry {
     static INSTANCES: OnceLock<InstanceRegistry> = OnceLock::new();
     INSTANCES.get_or_init(InstanceRegistry::new)
+}
+
+/// Which plugins asked to be consulted before an operation commits.
+fn interceptors() -> &'static InterceptorRegistry {
+    static INTERCEPTORS: OnceLock<InterceptorRegistry> = OnceLock::new();
+    INTERCEPTORS.get_or_init(InterceptorRegistry::new)
 }
 
 /// Starts wasmtime's epoch ticker once, on first use.
@@ -245,6 +251,25 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
                 );
             }
         }
+        // Interceptors are the control surface, so only a plugin that
+        // actually activated may join a chain — being consulted about
+        // an operation it cannot answer for is worse than not being
+        // consulted at all.
+        for entry in &staged_arc.manifest.contributions.interceptors {
+            if let Err(err) = interceptors().register(InterceptorRegistration {
+                plugin_id: plugin_id.clone(),
+                point: entry.point,
+                priority: entry.priority,
+                purpose: entry.purpose.clone(),
+            }) {
+                tracing::warn!(
+                    plugin = %plugin_id,
+                    point = entry.point.as_str(),
+                    %err,
+                    "ignoring an interceptor the registry rejected",
+                );
+            }
+        }
     }
 
     let mut reg = registry().lock().expect("registry mutex");
@@ -307,6 +332,67 @@ pub async fn emit_event(topic: String, payload: String) -> Result<serde_json::Va
     serde_json::to_value(view).map_err(|err| Error::from_reason(err.to_string()))
 }
 
+/// Which plugins are wired into which interceptor chain, in resolved
+/// order.
+///
+/// The server reads this once after boot so it only pays a round trip
+/// on chains a plugin actually registered for.
+#[napi(js_name = "listInterceptors")]
+pub fn list_interceptors() -> Result<serde_json::Value> {
+    let registrations = interceptors()
+        .all()
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    let view: Vec<serde_json::Value> = registrations
+        .into_iter()
+        .map(|entry| {
+            serde_json::json!({
+                "pluginId": entry.plugin_id,
+                "extensionPoint": entry.point.as_str(),
+                "priority": entry.priority,
+                "purpose": entry.purpose,
+            })
+        })
+        .collect();
+    serde_json::to_value(view).map_err(|err| Error::from_reason(err.to_string()))
+}
+
+/// Runs the plugin segment of an interceptor chain and returns its
+/// verdict.
+///
+/// An interceptor that traps, overruns its deadline, or cancels without
+/// a reason is skipped and the operation proceeds. That is deliberate:
+/// a third-party plugin crashing must not be able to stop someone
+/// running a query against their own database. Skipped plugins are
+/// reported rather than swallowed so a broken one can be attributed.
+#[napi(js_name = "runInterceptors")]
+pub async fn run_interceptors(
+    extension_point: String,
+    context_json: String,
+) -> Result<serde_json::Value> {
+    let point = ExtensionPoint::parse(&extension_point)
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    let registrations = interceptors()
+        .for_point(point)
+        .map_err(|err| Error::from_reason(err.to_string()))?;
+    let (verdict, steps) =
+        plamenix_plugin_host::run_chain(instances(), &registrations, point, &context_json).await;
+
+    let skipped: Vec<serde_json::Value> = steps
+        .into_iter()
+        .filter_map(|step| {
+            step.failure.map(|failure| {
+                serde_json::json!({
+                    "pluginId": step.plugin_id,
+                    "reason": format!("{}: {}", failure.kind, failure.message),
+                })
+            })
+        })
+        .collect();
+
+    serde_json::to_value(serde_json::json!({ "verdict": verdict, "skipped": skipped }))
+        .map_err(|err| Error::from_reason(err.to_string()))
+}
+
 /// Drops the plugin's registry entry, releasing the wasmtime Store and
 /// staged bundle. Subsequent `activatePlugin` calls require a fresh
 /// `loadPlugin` to re-stage.
@@ -316,6 +402,12 @@ pub async fn deactivate_plugin(plugin_id: String) -> Result<()> {
     // between the two would find a plugin the bus still lists and the
     // registry no longer holds.
     bus().unsubscribe_by_plugin(&plugin_id);
+    // Same ordering argument for the control surface, and more urgent:
+    // a chain that still lists a plugin whose instance is gone would
+    // consult something that cannot answer.
+    if let Err(err) = interceptors().unregister_by_plugin(&plugin_id) {
+        tracing::warn!(plugin = %plugin_id, %err, "interceptor registry would not release the plugin");
+    }
 
     // Drop the live instance first: removing it releases the wasmtime
     // Store, and with it the plugin's linear memory and tables. Doing

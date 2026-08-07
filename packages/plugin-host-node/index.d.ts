@@ -22,29 +22,6 @@ export interface ActivatedPluginInfo {
  */
 export declare function activatePlugin(pluginId: string): Promise<ActivatedPluginInfo>
 
-/**
- * Emits a topic to every subscribed plugin, reporting failures to the
- * supervisor. Resolves with one entry per subscriber:
- * `{ pluginId, status, detail, disabled }`.
- *
- * A plugin trapping on an event must not fail the request that
- * produced it, so failures are reported rather than thrown.
- */
-export declare function emitEvent(topic: string, payload: string): Promise<Array<{
-  pluginId: string
-  status: 'delivered' | 'notInstantiated' | 'closed' | 'failed'
-  /**
-   * Why a `failed` delivery failed. `deadline` means the plugin ran
-   * past its time budget and the host interrupted it; `trapped` means
-   * the guest itself faulted; `host` means the failure was on our side
-   * of the boundary. `null` unless `status` is `failed`.
-   */
-  reason: 'deadline' | 'trapped' | 'host' | null
-  /** The full error chain, including the wasm backtrace. */
-  detail: string | null
-  disabled: boolean
-}>>
-
 export interface ActivationInfo {
   status: string
   message?: string
@@ -65,6 +42,18 @@ export declare function clearCallContext(pluginId: string): Promise<void>
 export declare function deactivatePlugin(pluginId: string): Promise<void>
 
 /**
+ * Emits `topic` to every subscribed plugin, reporting failures to the
+ * supervisor.
+ *
+ * The single entry point for host-originated events on this edition,
+ * mirroring the desktop shell's. Returns one entry per subscriber so
+ * the caller can see who was reached and what the supervisor made of
+ * any failure — a plugin trapping on an event must not fail the
+ * request that produced it.
+ */
+export declare function emitEvent(topic: string, payload: string): Promise<any>
+
+/**
  * Persists an optional-permission grant on the plugin's registry
  * entry. No-op when already granted. Returns the updated activated
  * view so callers can refresh their cached UI state.
@@ -82,6 +71,15 @@ export declare function initTracing(): string
  * state; safe to call from any Fastify request handler.
  */
 export declare function listActive(): Promise<Array<ActivatedPluginInfo>>
+
+/**
+ * Which plugins are wired into which interceptor chain, in resolved
+ * order.
+ *
+ * The server reads this once after boot so it only pays a round trip
+ * on chains a plugin actually registered for.
+ */
+export declare function listInterceptors(): any
 
 /**
  * Loads a plugin bundle from disk. Validates the manifest, compiles
@@ -120,6 +118,18 @@ export declare function reloadPlugin(pluginId: string): Promise<ActivatedPluginI
  * permission was not granted.
  */
 export declare function revokePermission(pluginId: string, permission: string): Promise<void>
+
+/**
+ * Runs the plugin segment of an interceptor chain and returns its
+ * verdict.
+ *
+ * An interceptor that traps, overruns its deadline, or cancels without
+ * a reason is skipped and the operation proceeds. That is deliberate:
+ * a third-party plugin crashing must not be able to stop someone
+ * running a query against their own database. Skipped plugins are
+ * reported rather than swallowed so a broken one can be attributed.
+ */
+export declare function runInterceptors(extensionPoint: string, contextJson: string): Promise<any>
 
 /**
  * Sets the calling session identifier for the named plugin's next

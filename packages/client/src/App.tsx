@@ -32,6 +32,9 @@ import {
   registerBuiltinDefaultKeybindings,
   connectionOpeningChain,
   editorSavingChain,
+  installPluginInterceptors,
+  type ExtensionPoint,
+  type PluginInterceptorOutcome,
   installDestructiveDropInterceptor,
   setConfirmationProvider,
   type ConfirmationRequest,
@@ -688,6 +691,44 @@ export function App() {
     lastAutoDeadRef.current = activeTab.id;
     void handleReconnect();
   }, [activeTab.health, activeTab.busy, activeTab.id, autoReconnect, handleReconnect]);
+
+  // Wires activated plugins into the interceptor chains. Runs once:
+  // the web edition activates plugins server-side at boot, so unlike
+  // the desktop shell there is no client-driven reload to react to.
+  useEffect(() => {
+    let handle: { dispose(): void } | null = null;
+    let cancelled = false;
+    void installPluginInterceptors({
+      listInterceptors: async () => {
+        const res = await fetch('/api/plugins/interceptors');
+        if (!res.ok) return [];
+        const body = (await res.json()) as {
+          interceptors: Array<{ extensionPoint: ExtensionPoint }>;
+        };
+        return body.interceptors;
+      },
+      runInterceptors: async (extensionPoint, contextJson) => {
+        const res = await fetch('/api/plugins/interceptors/run', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ extensionPoint, contextJson }),
+        });
+        if (!res.ok) {
+          // A transport failure is not a plugin verdict. Proceeding is
+          // the same fail-open rule the host applies to a trap.
+          return { verdict: { action: 'proceed' }, skipped: [] };
+        }
+        return (await res.json()) as PluginInterceptorOutcome;
+      },
+    }).then((installed) => {
+      if (cancelled) installed.dispose();
+      else handle = installed;
+    });
+    return () => {
+      cancelled = true;
+      handle?.dispose();
+    };
+  }, []);
 
   const refreshCryptState = async (tabId: string, sessionId: string) => {
     try {

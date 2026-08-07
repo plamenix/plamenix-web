@@ -18,7 +18,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildApp, type App } from '../../src/app.js';
@@ -38,6 +38,41 @@ describe('plugin lifecycle routes', () => {
     // bundle so the bootstrap discovers + activates it on app boot.
     const pluginsDir = join(workDir, 'plugins');
     cpSync(HELLO_BUNDLE_SRC, join(pluginsDir, 'hello'), { recursive: true });
+
+    // A second bundle, for the grant/revoke assertions.
+    //
+    // They used to run against `hello`, which declared `db.schema.list`
+    // while targeting `plugin-minimal` — a world that imports nothing
+    // but `host`. The host now refuses a capability the declared world
+    // cannot reach, and `hello`'s manifest was corrected to request
+    // nothing, so there is no longer anything to grant it.
+    //
+    // Only a UI-only plugin can hold a capability at present: the
+    // higher worlds are declared in the WIT but none of their imports
+    // has a host implementation, so a *wasm* plugin that declared one
+    // would be refused at load. That is a real limitation of this
+    // build, not of this test.
+    mkdirSync(join(pluginsDir, 'grantable'), { recursive: true });
+    writeFileSync(
+      join(pluginsDir, 'grantable', 'manifest.toml'),
+      `
+[plugin]
+id = "dev.plamenix.grantable"
+name = "Grantable"
+version = "1.0.0"
+plamenix_min_version = ">=1.0.0-beta"
+plugin_api = "1.0"
+world = "plamenix:plugin@1.0.0/plugin-integrated"
+
+[entry_points]
+ui = "ui.mjs"
+
+[permissions]
+required = ["db.schema.list"]
+optional = ["clipboard.read"]
+`,
+    );
+    writeFileSync(join(pluginsDir, 'grantable', 'ui.mjs'), 'export default {};\n');
 
     process.env.PLUGINS_PATH = pluginsDir;
     process.env.PLUGIN_DATA_ROOT = join(workDir, 'plugin-data');
@@ -60,9 +95,11 @@ describe('plugin lifecycle routes', () => {
     const res = await app.inject({ method: 'GET', url: '/api/plugins' });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { plugins: Array<{ id: string; activation: { status: string } }> };
-    expect(body.plugins).toHaveLength(1);
-    expect(body.plugins[0]?.id).toBe('dev.plamenix.hello');
-    expect(body.plugins[0]?.activation.status).toBe('ok');
+    // Two bundles are staged: the wasm `hello` and the UI-only
+    // `grantable` the permission tests need.
+    const hello = body.plugins.find((p) => p.id === 'dev.plamenix.hello');
+    expect(hello).toBeDefined();
+    expect(hello?.activation.status).toBe('ok');
   });
 
   it('rejects POST /api/plugins/load with a malformed body', async () => {
@@ -78,21 +115,21 @@ describe('plugin lifecycle routes', () => {
   it('grants a permission and shows it under grantedPermissions', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/plugins/dev.plamenix.hello/grant',
+      url: '/api/plugins/dev.plamenix.grantable/grant',
       payload: { permission: 'db.schema.list' },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
       plugins: Array<{ id: string; grantedPermissions: string[] }>;
     };
-    const hello = body.plugins.find((p) => p.id === 'dev.plamenix.hello');
-    expect(hello?.grantedPermissions).toContain('db.schema.list');
+    const granted = body.plugins.find((p) => p.id === 'dev.plamenix.grantable');
+    expect(granted?.grantedPermissions).toContain('db.schema.list');
   });
 
   it('refuses a grant whose capability string fails the grammar check', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/plugins/dev.plamenix.hello/grant',
+      url: '/api/plugins/dev.plamenix.grantable/grant',
       payload: { permission: 'this.is.not.a.real.capability' },
     });
     expect(res.statusCode).toBe(400);
@@ -102,15 +139,15 @@ describe('plugin lifecycle routes', () => {
   it('revokes a granted permission', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/plugins/dev.plamenix.hello/revoke',
+      url: '/api/plugins/dev.plamenix.grantable/revoke',
       payload: { permission: 'db.schema.list' },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
       plugins: Array<{ id: string; grantedPermissions: string[] }>;
     };
-    const hello = body.plugins.find((p) => p.id === 'dev.plamenix.hello');
-    expect(hello?.grantedPermissions).not.toContain('db.schema.list');
+    const granted = body.plugins.find((p) => p.id === 'dev.plamenix.grantable');
+    expect(granted?.grantedPermissions).not.toContain('db.schema.list');
   });
 
   it('refuses lifecycle actions on an unknown plugin id', async () => {
@@ -180,24 +217,27 @@ describe('plugin lifecycle routes', () => {
 
   it('POST /api/plugins/:id/reload reactivates without a host restart and replays persisted grants', async () => {
     // Grant a permission so the reload's replay path can be verified.
+    // Against `grantable` rather than `hello`: only a UI-only plugin
+    // can currently hold a capability at all, because the worlds that
+    // expose the imports behind one are not linkable in this build.
     await app.inject({
       method: 'POST',
-      url: '/api/plugins/dev.plamenix.hello/grant',
-      payload: { permission: 'os.notify' },
+      url: '/api/plugins/dev.plamenix.grantable/grant',
+      payload: { permission: 'clipboard.read' },
     });
 
     const reload = await app.inject({
       method: 'POST',
-      url: '/api/plugins/dev.plamenix.hello/reload',
+      url: '/api/plugins/dev.plamenix.grantable/reload',
     });
     expect(reload.statusCode).toBe(200);
     const body = reload.json() as {
       activated: { id: string; activation: { status: string }; grantedPermissions: string[] };
     };
-    expect(body.activated.id).toBe('dev.plamenix.hello');
+    expect(body.activated.id).toBe('dev.plamenix.grantable');
     expect(body.activated.activation.status).toBe('ok');
     // Grant replayed by the reload route's own bootstrap-style loop.
-    expect(body.activated.grantedPermissions).toContain('os.notify');
+    expect(body.activated.grantedPermissions).toContain('clipboard.read');
   });
 
   it('POST /api/plugins/:id/reload returns 400 for an unknown plugin id', async () => {

@@ -18,6 +18,23 @@ const idParam = z.object({ id: z.string().min(1) });
 const loadBody = z.object({ bundlePath: z.string().min(1) });
 const permissionBody = z.object({ permission: z.string().min(1) });
 
+/** The closed set of interceptor points, mirrored from
+ *  `plamenix_plugin_host::interceptor::ExtensionPoint`. Validating here
+ *  means a typo is a 400 rather than a napi error string. */
+const runInterceptorsBody = z.object({
+  extensionPoint: z.enum([
+    'query.executing',
+    'cell.committing',
+    'row.inserting',
+    'row.deleting',
+    'connection.opening',
+    'export.starting',
+    'editor.saving',
+    'schema.action-applying',
+  ]),
+  contextJson: z.string(),
+});
+
 /**
  * I7.8 — admin install body.
  *
@@ -71,6 +88,47 @@ export function pluginsRoute(options: PluginsRouteOptions) {
     app.get('/api/plugins', async () => {
       const active = await pluginHost.listActive();
       return { plugins: active };
+    });
+
+    /**
+     * Which plugins are wired into which interceptor chain.
+     *
+     * The client reads this once after boot so it only pays a round
+     * trip on chains a plugin actually registered for —
+     * `query.executing` guards every statement the user runs.
+     */
+    app.get('/api/plugins/interceptors', async () => {
+      return { interceptors: pluginHost.listInterceptors() };
+    });
+
+    /**
+     * Runs the plugin segment of an interceptor chain.
+     *
+     * Always 200. An interceptor that traps, overruns its deadline, or
+     * cancels without a reason is skipped and the operation proceeds;
+     * returning an error status would let a broken third-party plugin
+     * block the user's own query, which is the outcome the fail-open
+     * design exists to prevent. Skipped plugins come back named so the
+     * client can surface them.
+     */
+    app.post('/api/plugins/interceptors/run', async (request, reply) => {
+      const parsed = runInterceptorsBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
+      }
+      try {
+        return await pluginHost.runInterceptors(
+          parsed.data.extensionPoint,
+          parsed.data.contextJson,
+        );
+      } catch (err) {
+        // Only reachable when the point itself is unknown, which is a
+        // client bug rather than a plugin misbehaving.
+        return reply.code(400).send({
+          error: 'interceptor_run_failed',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     });
 
     app.post('/api/plugins/load', async (request, reply) => {
