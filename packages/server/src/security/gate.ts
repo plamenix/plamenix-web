@@ -95,6 +95,32 @@ export function bearerToken(header: string | undefined): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+/**
+ * Reads the token a WebSocket upgrade carries.
+ *
+ * The browser `WebSocket` constructor cannot set `Authorization` — it
+ * takes a URL and a subprotocol list and nothing else — so an upgrade
+ * offers its token as a subprotocol instead. Read here rather than only
+ * in the events route so that one place decides who is authenticated,
+ * and so a refused upgrade lands in the audit log beside every other
+ * refusal rather than in a second scheme of its own.
+ *
+ * The alternative, a query parameter, puts the token in access logs,
+ * proxy logs and `Referer`.
+ */
+export function upgradeToken(header: string | string[] | undefined): string | null {
+  const raw = Array.isArray(header) ? header.join(',') : header;
+  if (raw === undefined || raw === '') return null;
+  for (const entry of raw.split(',')) {
+    const value = entry.trim();
+    if (value.startsWith('plamenix.bearer.')) {
+      const token = value.slice('plamenix.bearer.'.length);
+      return token.length > 0 ? token : null;
+    }
+  }
+  return null;
+}
+
 /** How the gate reports an event worth recording. */
 export type AuditSink = (entry: {
   action: string;
@@ -164,7 +190,9 @@ export function installSecurityGate(app: FastifyInstance, options: GateOptions):
 
     let actor: string | null = null;
     if (!isPublic) {
-      const supplied = bearerToken(request.headers.authorization);
+      const supplied =
+        bearerToken(request.headers.authorization) ??
+        upgradeToken(request.headers['sec-websocket-protocol']);
       actor = supplied === null ? null : actorFor(supplied, options.tokens);
       if (actor === null) {
         options.audit({

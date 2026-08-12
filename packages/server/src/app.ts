@@ -21,6 +21,8 @@ import { installSecurityGate } from './security/gate.js';
 import { resolveTokens } from './security/token.js';
 import { RateLimiter } from './security/rate-limit.js';
 import { reapIdleSessions, sessionStore } from './sessions/store.js';
+import websocket from '@fastify/websocket';
+import { EventChannel, eventChannelRoute } from './events/channel.js';
 
 // `Fastify(...)` returns a richer generic than the bare `FastifyInstance`
 // alias; letting TS infer the return type from the body avoids a
@@ -126,6 +128,15 @@ export async function buildApp(env: Env) {
       const id = (body as { sessionId?: unknown }).sessionId;
       if (typeof id === 'string') sessionStore.touch(id);
     }
+  });
+
+  // The host→client push channel. Registered before the routes so the
+  // upgrade handler exists by the time anything tries to broadcast.
+  await app.register(websocket);
+  const events = new EventChannel();
+  await app.register(eventChannelRoute(events, { tokens: auth.tokens, audit }));
+  app.addHook('onClose', async () => {
+    events.closeAll();
   });
 
   const profileStore = new ProfileStore(env.PROFILES_PATH);
