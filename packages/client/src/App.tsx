@@ -7,7 +7,6 @@ import {
   recordExec,
 } from './app-helpers.js';
 import {
-  CommandPalette,
   ConfirmationModal,
   ConnectionScreen,
   DdlViewerModal,
@@ -26,13 +25,10 @@ import {
   SettingsButton,
   SettingsPage,
   TableObjectView,
-  SearchPalette,
   StatsDashboard,
-  StatusBar,
   swatchFor,
   TabStrip,
   WelcomeDashboard,
-  ShortcutsCheatSheet,
   getModKeyLabel,
   registerBuiltinDefaultKeybindings,
   useConnectionActions,
@@ -41,6 +37,8 @@ import {
   dispatchSchemaDdl,
   applySchemaAction,
   useSessionRefreshers,
+  ShellOverlays,
+  appendIdentifier,
   profileToForm,
   firstRows,
   firstAffected,
@@ -1211,35 +1209,27 @@ export function App() {
         onDeleteEntry={deleteHistoryEntry}
         onDeleteEntries={deleteHistoryEntries}
       />
-      <StatusBar
-        sessionId={activeTab.sessionId}
-        health={activeTab.health}
-        user={activeTab.form.user}
-        host={activeTab.form.host}
-        port={activeTab.form.port}
-        database={activeTab.form.database}
-        executedSql={activeTab.executedSql}
-        results={activeTab.results}
+      <ShellOverlays
+        tab={{
+          sessionId: activeTab.sessionId,
+          health: activeTab.health,
+          user: activeTab.form.user,
+          host: activeTab.form.host,
+          port: activeTab.form.port,
+          database: activeTab.form.database,
+          executedSql: activeTab.executedSql,
+          results: activeTab.results,
+          schema: activeTab.schema,
+        }}
         recentKey={recentKeyOf(activeTab.form, activeTab.profileName)}
-      />
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
         commands={commands}
-      />
-      <ShortcutsCheatSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <SearchPalette
-        open={searchOpen}
-        schema={activeTab.schema}
-        onClose={() => setSearchOpen(false)}
-        onPick={(id) =>
-          patchTab(activeTabId, {
-            sql:
-              activeTab.sql.length > 0 && !activeTab.sql.endsWith(' ')
-                ? `${activeTab.sql} ${id}`
-                : `${activeTab.sql}${id}`,
-          })
-        }
+        paletteOpen={paletteOpen}
+        onPaletteClose={() => setPaletteOpen(false)}
+        shortcutsOpen={shortcutsOpen}
+        onShortcutsClose={() => setShortcutsOpen(false)}
+        searchOpen={searchOpen}
+        onSearchClose={() => setSearchOpen(false)}
+        onSearchPick={(id) => patchTab(activeTabId, { sql: appendIdentifier(activeTab.sql, id) })}
       />
       <StatsDashboard
         open={statsOpen}
