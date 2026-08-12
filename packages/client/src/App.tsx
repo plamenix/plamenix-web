@@ -41,6 +41,7 @@ import {
   dispatchSchemaDdl,
   applySchemaAction,
   useSessionRefreshers,
+  profileToForm,
   firstRows,
   firstAffected,
   type ConnectionAdapter,
@@ -332,19 +333,7 @@ export function App() {
       selectedProfileId: id,
       profileName: profile.name,
       profileColor: profile.color ?? null,
-      form: {
-        host: profile.host,
-        port: profile.port,
-        database: profile.database,
-        user: profile.user,
-        password: '',
-        pureRust: profile.pureRust,
-        encryptionKey: '',
-        encryptionRequired: profile.encryptionRequired,
-        fbclientPath: profile.fbclientPath ?? '',
-        charset: profile.charset ?? 'UTF8',
-        embedded: profile.embedded ?? false,
-      },
+      form: profileToForm(profile),
     });
   };
 
@@ -406,58 +395,9 @@ export function App() {
   };
 
   const handleQuickConnect = async (profileId: string) => {
-    const tabId = activeTabId;
     const profile = profiles.find((p) => p.id === profileId);
     if (!profile) return;
-    patchTab(tabId, {
-      error: null,
-      busy: true,
-      cryptState: null,
-      selectedProfileId: profileId,
-      profileName: profile.name,
-      form: {
-        ...activeTab.form,
-        host: profile.host,
-        port: profile.port,
-        database: profile.database,
-        user: profile.user,
-        encryptionRequired: profile.encryptionRequired,
-        pureRust: profile.pureRust,
-      },
-    });
-    try {
-      const args: ProfileConnectArgs = {
-        password: activeTab.form.password,
-        pureRust: profile.pureRust,
-        encryptionRequired: profile.encryptionRequired,
-      };
-      if (activeTab.form.encryptionKey !== '') {
-        args.encryptionKey = activeTab.form.encryptionKey;
-      }
-      if (activeTab.form.fbclientPath !== '') {
-        args.fbclientPath = activeTab.form.fbclientPath;
-      }
-      if (activeTab.form.charset !== '') {
-        args.charset = activeTab.form.charset;
-      }
-      const response = await connectByProfile(profileId, args);
-      patchTab(tabId, {
-        sessionId: response.sessionId,
-        results: null,
-        health: 'healthy',
-        lastPingAt: Date.now(),
-        connectedAt: Date.now(),
-      });
-      renameTab(tabId, profile.name);
-      void refreshCryptState(tabId, response.sessionId);
-      void refreshTxStatus(tabId, response.sessionId);
-      void refreshSchema(tabId, response.sessionId);
-      void refreshEngineVersion(tabId, response.sessionId);
-    } catch (err) {
-      patchTab(tabId, { error: String(err) });
-    } finally {
-      patchTab(tabId, { busy: false });
-    }
+    await quickConnect(profile);
   };
 
   // Connect, reconnect, test, the health probe and auto-reconnect live
@@ -515,7 +455,12 @@ export function App() {
   );
 
   const autoReconnect = useConnectionPrefs((s) => s.autoReconnect);
-  const { handleConnect, handleReconnect, handleTestConnection } = useConnectionActions({
+  const {
+    handleConnect,
+    handleReconnect,
+    handleTestConnection,
+    handleQuickConnect: quickConnect,
+  } = useConnectionActions({
     adapter: connectionAdapter,
     activeTab,
     tabs,
