@@ -37,6 +37,7 @@ import {
   dispatchSchemaDdl,
   applySchemaAction,
   useSessionRefreshers,
+  runGuardedExport,
   ShellOverlays,
   appendIdentifier,
   profileToForm,
@@ -50,13 +51,8 @@ import {
   setConfirmationProvider,
   type ConfirmationRequest,
   type PendingConfirmation,
-  emitExportCompleted,
-  emitExportFailed,
-  emitExportStarted,
   emitEditorFocused,
   emitEditorSelectionChanged,
-  exportStartingChain,
-  newExportId,
   useGlobalKeybindings,
   useConnectionPrefs,
   useEmitConnectionEvents,
@@ -640,78 +636,37 @@ export function App() {
   );
 
   const handleStreamedExport: StreamedExportRunner = useCallback(
-    async (req: StreamedExportRequest): Promise<StreamedExportResult> => {
-      const exportId = newExportId();
-      const startedAt = Date.now();
-      const scopeLabel =
-        req.scope.kind === 'statement'
-          ? (req.scope.label ?? req.scope.table?.name ?? req.scope.sql.slice(0, 80))
-          : req.scope.tables.map((t) => t.name).join(', ');
-      const tables =
-        req.scope.kind === 'statement'
-          ? req.scope.table
-            ? [req.scope.table.name]
-            : []
-          : req.scope.tables.map((t) => t.name);
-      const exportDecision = await exportStartingChain.run({
+    async (req: StreamedExportRequest): Promise<StreamedExportResult> =>
+      runGuardedExport(req, {
         tabId: activeTab.id,
-        sessionId: req.sessionId,
-        format: req.format,
-        scopeKind: req.scope.kind,
-        scopeLabel,
-        tables,
-      });
-      if (exportDecision.action === 'cancel') {
-        throw new Error(exportDecision.reason);
-      }
-      emitExportStarted({
-        exportId,
-        tabId: activeTab.id,
-        sessionId: req.sessionId,
-        format: req.format,
-        scopeKind: req.scope.kind,
-        scopeLabel,
-        startedAt,
-      });
-      try {
-        const response = await fetch('/api/export', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({
-            sessionId: req.sessionId,
-            format: req.format,
-            csvDelimiter: req.csvDelimiter,
-            scope: req.scope,
-            includeDdl: req.includeDdl ?? true,
-          }),
-        });
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          throw new Error(text || `export HTTP ${response.status}`);
-        }
-        const blob = await response.blob();
-        const disposition = response.headers.get('Content-Disposition') ?? '';
-        const m = /filename="([^"]+)"/.exec(disposition);
-        const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
-        const suggestedFilename = m?.[1] ?? `plamenix-export-${stamp}.${req.format}`;
-        emitExportCompleted({
-          exportId,
-          durationMs: Date.now() - startedAt,
-          byteSize: blob.size,
-          rowCount: null,
-          completedAt: Date.now(),
-        });
-        return { blob, suggestedFilename };
-      } catch (err) {
-        emitExportFailed({
-          exportId,
-          durationMs: Date.now() - startedAt,
-          error: err instanceof Error ? err.message : String(err),
-          failedAt: Date.now(),
-        });
-        throw err;
-      }
-    },
+        // Raw `fetch` rather than the transport: this endpoint answers
+        // with a file, not the transport's JSON envelope.
+        transfer: async (request) => {
+          const response = await fetch('/api/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({
+              sessionId: request.sessionId,
+              format: request.format,
+              csvDelimiter: request.csvDelimiter,
+              scope: request.scope,
+              includeDdl: request.includeDdl ?? true,
+            }),
+          });
+          if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            throw new Error(text || `export HTTP ${response.status}`);
+          }
+          const blob = await response.blob();
+          const disposition = response.headers.get('Content-Disposition') ?? '';
+          const named = /filename="([^"]+)"/.exec(disposition);
+          const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+          return {
+            blob,
+            suggestedFilename: named?.[1] ?? `plamenix-export-${stamp}.${request.format}`,
+          };
+        },
+      }),
     [activeTab.id],
   );
 
