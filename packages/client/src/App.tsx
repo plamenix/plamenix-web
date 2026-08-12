@@ -36,6 +36,8 @@ import {
   dispatchSchemaDdl,
   applySchemaAction,
   useSessionRefreshers,
+  quoteIdentifier,
+  countFromCell,
   runGuardedExport,
   ShellOverlays,
   appendIdentifier,
@@ -673,9 +675,7 @@ export function App() {
     async (table: TableInfo): Promise<TableExportPart> => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table.name)
-        ? table.name
-        : `"${table.name.replace(/"/g, '""')}"`;
+      const quoted = quoteIdentifier(table.name);
       const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
         sessionId: tab.sessionId,
         sql: `SELECT * FROM ${quoted}`,
@@ -694,7 +694,7 @@ export function App() {
     async ({ table, predicate }: { table: string; predicate: string | null }) => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table) ? table : `"${table.replace(/"/g, '""')}"`;
+      const quoted = quoteIdentifier(table);
       const sql = predicate
         ? `SELECT COUNT(*) FROM ${quoted} WHERE ${predicate}`
         : `SELECT COUNT(*) FROM ${quoted}`;
@@ -702,26 +702,8 @@ export function App() {
         sessionId: tab.sessionId,
         sql,
       });
-      const first = outcomes[0];
-      if (!first || first.status !== 'ok' || !('Rows' in first.result)) {
-        throw new Error('COUNT(*) did not return a row.');
-      }
-      const cell = first.result.Rows.rows[0]?.cells[0];
-      if (!cell) throw new Error('COUNT(*) returned an empty row.');
-      if (cell.type === 'integer') {
-        // Integers cross the wire as exact decimal text so a BIGINT
-        // survives the JSON hop. A row count is bounded by what the UI
-        // can page through, so narrowing it here is safe.
-        const parsed = Number(cell.value);
-        if (!Number.isFinite(parsed)) {
-          throw new Error(`COUNT(*) returned an unparseable value: ${cell.value}.`);
-        }
-        return parsed;
-      }
-      if (cell.type === 'float' && typeof cell.value === 'number') {
-        return cell.value;
-      }
-      throw new Error(`COUNT(*) returned an unexpected cell type: ${cell.type}.`);
+      const { rows } = firstRows(outcomes, 'COUNT(*)');
+      return countFromCell(rows[0]?.cells[0]);
     },
     [activeTab],
   );
@@ -730,7 +712,7 @@ export function App() {
     async ({ table, predicate }: { table: string; predicate: string | null }) => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table) ? table : `"${table.replace(/"/g, '""')}"`;
+      const quoted = quoteIdentifier(table);
       const sql = predicate
         ? `SELECT * FROM ${quoted} WHERE ${predicate}`
         : `SELECT * FROM ${quoted}`;
