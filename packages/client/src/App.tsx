@@ -37,6 +37,10 @@ import {
   applySchemaAction,
   useSessionRefreshers,
   quoteIdentifier,
+  abandonStatement,
+  abandonNeedsConfirmation,
+  describeAbandonCost,
+  isStaleSession,
   countFromCell,
   runGuardedExport,
   ShellOverlays,
@@ -550,6 +554,9 @@ export function App() {
     const sql = decision.sql;
     const key = recentKeyOf(tab.form, tab.profileName);
     const startedAt = Date.now();
+    // Remembered so the outcome can be discarded if the tab has moved
+    // to a different session by the time it settles.
+    const ranAgainst = tab.sessionId;
     patchTab(tabId, { error: null, busy: true });
     try {
       const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
@@ -565,10 +572,20 @@ export function App() {
       // counts each one after, so the indicator needs a refresh.
       if (tab.sessionId) void refreshTxStatus(tabId, tab.sessionId);
     } catch (err) {
+      // A statement whose session the tab has since left is not a
+      // failure to report: abandoning ends the session under the
+      // in-flight execute, so this rejection is the abandon working.
+      // Writing it would stamp an error on a tab that has already
+      // reconnected and looks healthy.
+      if (isStaleSession(ranAgainst, useTabsStore.getState().tabs.find((t) => t.id === tabId)?.sessionId ?? null)) {
+        return;
+      }
       patchTab(tabId, { error: String(err) });
       recordExec(key, sql, startedAt, null, String(err));
     } finally {
-      patchTab(tabId, { busy: false });
+      if (!isStaleSession(ranAgainst, useTabsStore.getState().tabs.find((t) => t.id === tabId)?.sessionId ?? null)) {
+        patchTab(tabId, { busy: false });
+      }
     }
   };
 
@@ -872,6 +889,25 @@ export function App() {
     );
   };
 
+  // Firebird offers no way to stop a running statement through either
+  // backend Plamenix ships, so the only honest lever is the attachment
+  // itself: detaching rolls back the transaction and the server stops
+  // the work with it. The user is told that cost before it happens.
+  const handleAbandon = async () => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    if (!tab.sessionId) return;
+    if (abandonNeedsConfirmation(tab.txStatus) && !window.confirm(describeAbandonCost(tab.txStatus))) {
+      return;
+    }
+    await abandonStatement({
+      sessionId: tab.sessionId,
+      close: (sessionId) => fetchTransport.invoke<{ closed: boolean }>('close', { sessionId }).then(() => undefined),
+      reconnect: handleReconnect,
+      onError: (message) => patchTab(tabId, { error: message }),
+    });
+  };
+
   const handleDisconnect = async () => {
     const tabId = activeTabId;
     const tab = activeTab;
@@ -1065,6 +1101,7 @@ export function App() {
           onSqlChange={(v) => patchTab(activeTabId, { sql: v })}
           onBookmarksChange={(next) => patchTab(activeTabId, { bookmarks: next })}
           onExecute={handleExecute}
+          onAbandon={() => void handleAbandon()}
           onDisconnect={handleDisconnect}
           onSetTxMode={(mode, config) => void handleSetTxMode(mode, config)}
           onCommitTx={() => void finishTx('commit')}
@@ -1237,6 +1274,7 @@ interface SessionViewProps {
   onSqlChange: (value: string) => void;
   onBookmarksChange: (next: Record<string, number>) => void;
   onExecute: () => void;
+  onAbandon: () => void;
   onDisconnect: () => void;
   onSetTxMode: (mode: TxMode, config: TxConfig) => void;
   onCommitTx: () => void;
@@ -1272,6 +1310,7 @@ function SessionView({
   onSqlChange,
   onBookmarksChange,
   onExecute,
+  onAbandon,
   onDisconnect,
   onSetTxMode,
   onCommitTx,
@@ -1394,6 +1433,7 @@ function SessionView({
             encryptionKeySupplied={tab.form.encryptionKey.length > 0}
             onSqlChange={onSqlChange}
             onExecute={onExecute}
+            onAbandon={onAbandon}
             onClose={onDisconnect}
             onBookmarksChange={onBookmarksChange}
             onOpenStats={onOpenStats}
