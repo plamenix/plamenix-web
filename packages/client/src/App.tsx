@@ -55,6 +55,7 @@ import {
   emitEditorFocused,
   emitEditorSelectionChanged,
   useDefaultKeybindings,
+  useBuiltinContributions,
   useConnectionPrefs,
   useEmitConnectionEvents,
   useEmitEditorEvents,
@@ -978,6 +979,12 @@ export function App() {
   // The dispatcher and the six shell defaults live in `@plamenix/ui`.
   // Handlers are passed directly: the hook owns the ref that keeps the
   // once-registered bindings pointed at the current ones.
+  // Every shipped built-in contribution, for the life of the shell.
+  // They used to register from inside the components that consumed
+  // them, which made a feature's availability depend on an unrelated
+  // component being mounted — the Format button was the visible case.
+  useBuiltinContributions();
+
   useDefaultKeybindings({
     openCheatSheet: () => setShortcutsOpen(true),
     openSearchPalette: () => setSearchOpen(true),
