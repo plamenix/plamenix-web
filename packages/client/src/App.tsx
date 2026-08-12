@@ -40,6 +40,7 @@ import {
   resolveStatement,
   dispatchSchemaDdl,
   applySchemaAction,
+  useSessionRefreshers,
   firstRows,
   firstAffected,
   type ConnectionAdapter,
@@ -569,37 +570,28 @@ export function App() {
     };
   }, []);
 
-  const refreshCryptState = async (tabId: string, sessionId: string) => {
-    try {
-      const res = await fetchTransport.invoke<CryptStateResponse>('crypt-state', { sessionId });
-      patchTab(tabId, { cryptState: res.state });
-    } catch {
-      patchTab(tabId, { cryptState: null });
-    }
-  };
+  const { refreshCryptState, refreshEngineVersion, refreshSchema, refreshTxStatus } =
+    useSessionRefreshers({
+      adapter: useMemo(
+        () => ({
+          cryptState: (sessionId) =>
+            fetchTransport
+              .invoke<CryptStateResponse>('crypt-state', { sessionId })
+              .then((r) => r.state),
+          engineVersion: (sessionId) =>
+            fetchTransport
+              .invoke<{ engineVersion: string }>('ping-session', { sessionId })
+              .then((r) => r.engineVersion),
+          describeSchema: (sessionId) =>
+            fetchTransport.invoke<Schema>('describe-schema', { sessionId }),
+          transactionStatus: (sessionId) =>
+            fetchTransport.invoke<TxStatus>('transaction/status', { sessionId }),
+        }),
+        [],
+      ),
+      patchTab,
+    });
 
-  const refreshEngineVersion = async (tabId: string, sessionId: string) => {
-    try {
-      const res = await fetchTransport.invoke<{ engineVersion: string }>('ping-session', {
-        sessionId,
-      });
-      patchTab(tabId, {
-        engineVersion: res.engineVersion.trim().length > 0 ? res.engineVersion.trim() : null,
-        lastPingAt: Date.now(),
-      });
-    } catch {
-      patchTab(tabId, { engineVersion: null });
-    }
-  };
-
-  const refreshSchema = async (tabId: string, sessionId: string) => {
-    try {
-      const schema = await fetchTransport.invoke<Schema>('describe-schema', { sessionId });
-      patchTab(tabId, { schema });
-    } catch (err) {
-      patchTab(tabId, { error: String(err) });
-    }
-  };
 
   const handleExecute = async () => {
     const tabId = activeTabId;
@@ -949,22 +941,6 @@ export function App() {
       patch: (patch) => patchTab(activeTabId, patch),
     });
   };
-
-  /// Pulls the session's transaction state into the tab, so the
-  /// indicator reflects the session rather than what the UI assumed.
-  const refreshTxStatus = useCallback(
-    async (tabId: string, sessionId: string) => {
-      try {
-        const status = await fetchTransport.invoke<TxStatus>('transaction/status', {
-          sessionId,
-        });
-        patchTab(tabId, { txStatus: status });
-      } catch {
-        // Not worth surfacing alone; the next real operation reports it.
-      }
-    },
-    [patchTab],
-  );
 
   const handleSetTxMode = async (mode: TxMode, config: TxConfig) => {
     const tabId = activeTabId;
