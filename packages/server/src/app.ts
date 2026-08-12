@@ -145,7 +145,7 @@ export async function buildApp(env: Env) {
 
   await app.register(pingRoute);
   await app.register(connectRoute(env));
-  await app.register(executeRoute(historyStore));
+  await app.register(executeRoute(historyStore, (event) => events.broadcast(event)));
   await app.register(exportRoute(env));
   await app.register(transactionRoute);
   await app.register(profilesRoute(profileStore, env));

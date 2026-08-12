@@ -4,6 +4,7 @@ import * as fbclient from '@plamenix/native';
 import * as pluginHost from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
 import type { HistoryStore } from '../history/store.js';
+import type { PushEvent } from '../events/channel.js';
 
 const executeBody = z.object({
   sessionId: z.string().uuid(),
@@ -19,7 +20,7 @@ const executeBody = z.object({
   historyLimit: z.number().int().positive().nullable().optional(),
 });
 
-export function executeRoute(history: HistoryStore) {
+export function executeRoute(history: HistoryStore, push?: (event: PushEvent) => void) {
   return async function (app: FastifyInstance): Promise<void> {
     app.post('/api/execute', async (request, reply) => {
       const parsed = executeBody.safeParse(request.body);
@@ -53,17 +54,19 @@ export function executeRoute(history: HistoryStore) {
         // Mirrors the desktop shell's first producer. Dispatch failures
         // are reported by the host rather than thrown, so a plugin
         // trapping on this event cannot fail the user's query.
+        const executed = {
+          statements: Array.isArray(outcomes) ? outcomes.length : 0,
+          sessionId: parsed.data.sessionId,
+        };
         try {
-          await pluginHost.emitEvent(
-            'db/query/executed',
-            JSON.stringify({
-              statements: Array.isArray(outcomes) ? outcomes.length : 0,
-              sessionId: parsed.data.sessionId,
-            }),
-          );
+          await pluginHost.emitEvent('db/query/executed', JSON.stringify(executed));
         } catch (err) {
           app.log.warn({ err }, 'failed to dispatch db/query/executed');
         }
+        // Same event, out to any attached browser. The desktop shell
+        // gets this through Tauri events; without this the web edition
+        // would dispatch to plugins and tell its own UI nothing.
+        push?.({ topic: 'db/query/executed', payload: executed });
 
         return outcomes;
       } catch (err) {

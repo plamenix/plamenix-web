@@ -100,6 +100,7 @@ import {
   type TxStatus,
 } from '@plamenix/ui';
 import { authHeaders, fetchTransport } from '@/transport/fetch';
+import { connectEventChannel } from '@/events/channel';
 import {
   connectByProfile,
   deleteProfile,
@@ -1020,6 +1021,11 @@ export function App() {
   // them, which made a feature's availability depend on an unrelated
   // component being mounted — the Format button was the visible case.
   useBuiltinContributions();
+
+  // The host→client push channel. Everything the server pushes lands on
+  // the shared event bus, so a subscriber cannot tell whether it came
+  // from this edition's WebSocket or the desktop shell's Tauri events.
+  useEffect(() => connectEventChannel(), []);
 
   useDefaultKeybindings({
     openCheatSheet: () => setShortcutsOpen(true),

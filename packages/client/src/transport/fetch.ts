@@ -45,6 +45,19 @@ export function authHeaders(): Record<string, string> {
   return API_TOKEN === null ? {} : { Authorization: `Bearer ${API_TOKEN}` };
 }
 
+/**
+ * The raw token, for the one caller that cannot use a header.
+ *
+ * The browser `WebSocket` constructor takes a URL and a subprotocol
+ * list and nothing else, so the push channel has to carry the token as
+ * a subprotocol. Exported narrowly rather than making `API_TOKEN`
+ * public: there is exactly one legitimate reason to want the bare
+ * value, and everything else should go through {@link authHeaders}.
+ */
+export function apiTokenForUpgrade(): string | null {
+  return API_TOKEN;
+}
+
 export const fetchTransport: Transport = {
   async invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     const url = `/api/${command}`;
