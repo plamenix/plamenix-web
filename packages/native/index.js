@@ -589,6 +589,7 @@ module.exports.databaseStats = nativeBinding.databaseStats
 module.exports.deactivatePlugin = nativeBinding.deactivatePlugin
 module.exports.describeSchema = nativeBinding.describeSchema
 module.exports.emitEvent = nativeBinding.emitEvent
+module.exports.eventPatterns = nativeBinding.eventPatterns
 module.exports.execute = nativeBinding.execute
 module.exports.executeBatch = nativeBinding.executeBatch
 module.exports.exportQuery = nativeBinding.exportQuery

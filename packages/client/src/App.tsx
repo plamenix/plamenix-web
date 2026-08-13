@@ -60,6 +60,7 @@ import {
   emitEditorSelectionChanged,
   useDefaultKeybindings,
   useBuiltinContributions,
+  usePluginEventForwarding,
   useConnectionPrefs,
   useEmitConnectionEvents,
   useEmitEditorEvents,
@@ -1021,6 +1022,32 @@ export function App() {
   // them, which made a feature's availability depend on an unrelated
   // component being mounted — the Format button was the visible case.
   useBuiltinContributions();
+
+  // Shell events reach WASM plugins from here. The host is asked which
+  // patterns anything subscribed to, so a topic nobody wants costs
+  // nothing — `editor/changed` fires as the user types.
+  const [pluginEventPatterns, setPluginEventPatterns] = useState<string[]>([]);
+  const refreshPluginEventPatterns = useCallback(() => {
+    void fetch('/api/plugins/event-patterns', { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : { patterns: [] }))
+      .then((body: { patterns?: string[] }) => setPluginEventPatterns(body.patterns ?? []))
+      .catch(() => setPluginEventPatterns([]));
+  }, []);
+  useEffect(refreshPluginEventPatterns, [refreshPluginEventPatterns]);
+  usePluginEventForwarding({
+    subscribedPatterns: pluginEventPatterns,
+    forward: (topic, payload) => {
+      void fetch('/api/plugins/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ topic, payload }),
+      }).catch(() => {
+        // A plugin trapping on an event must not disturb the
+        // interaction that produced it; the supervisor records it.
+      });
+    },
+  });
+
 
   // The host→client push channel. Everything the server pushes lands on
   // the shared event bus, so a subscriber cannot tell whether it came

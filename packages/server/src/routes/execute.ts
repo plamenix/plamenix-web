@@ -59,14 +59,14 @@ export function executeRoute(history: HistoryStore, push?: (event: PushEvent) =>
           sessionId: parsed.data.sessionId,
         };
         try {
-          await pluginHost.emitEvent('db/query/executed', JSON.stringify(executed));
+          await pluginHost.emitEvent('query/executed', JSON.stringify(executed));
         } catch (err) {
-          app.log.warn({ err }, 'failed to dispatch db/query/executed');
+          app.log.warn({ err }, 'failed to dispatch query/executed');
         }
         // Same event, out to any attached browser. The desktop shell
         // gets this through Tauri events; without this the web edition
         // would dispatch to plugins and tell its own UI nothing.
-        push?.({ topic: 'db/query/executed', payload: executed });
+        push?.({ topic: 'query/executed', payload: executed });
 
         return outcomes;
       } catch (err) {

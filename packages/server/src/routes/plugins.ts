@@ -14,6 +14,13 @@ export interface PluginsRouteOptions {
   pluginDataRoot: string;
 }
 
+const emitEventBody = z.object({
+  topic: z.string().min(1).max(256),
+  /** Already JSON, and passed through as a string — the host takes a
+   *  string and re-parsing here would only be a chance to change it. */
+  payload: z.string().max(64 * 1024),
+});
+
 const idParam = z.object({ id: z.string().min(1) });
 const loadBody = z.object({ bundlePath: z.string().min(1) });
 const permissionBody = z.object({ permission: z.string().min(1) });
@@ -238,6 +245,34 @@ export function pluginsRoute(options: PluginsRouteOptions) {
      * grants are replayed in the new activation by the same path the
      * bootstrap uses (see I1.6).
      */
+    /**
+     * Which event patterns any plugin is subscribed to.
+     *
+     * The browser asks before forwarding shell events: most of them
+     * originate in the UI, so reaching a WASM plugin costs a request
+     * per event and `editor/changed` fires as the user types. Nothing
+     * subscribed means nothing sent.
+     */
+    app.get('/api/plugins/event-patterns', async () => ({
+      patterns: pluginHost.eventPatterns(),
+    }));
+
+    /**
+     * Dispatches a shell event to every plugin subscribed to its topic.
+     *
+     * Resolves rather than failing when a plugin traps: an event is a
+     * notification, and a plugin crashing on one must not fail the
+     * interaction that produced it. The supervisor records the crash.
+     */
+    app.post('/api/plugins/events', async (request, reply) => {
+      const parsed = emitEventBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
+      }
+      const deliveries = await pluginHost.emitEvent(parsed.data.topic, parsed.data.payload);
+      return { deliveries };
+    });
+
     app.post('/api/plugins/:id/reload', async (request, reply) => {
       const parsed = idParam.safeParse(request.params);
       if (!parsed.success) {

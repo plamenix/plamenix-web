@@ -91,13 +91,13 @@ describe('receiving', () => {
     // The whole point: a subscriber should not need to know whether the
     // event arrived over a WebSocket or a Tauri event.
     const seen: unknown[] = [];
-    const sub = bus.subscribe('test.client', 'db/query/executed', (_topic, payload) => {
+    const sub = bus.subscribe('test.client', 'query/executed', (_topic, payload) => {
       seen.push(payload);
     });
     const { sockets } = connect();
 
     sockets[0]?.onmessage?.({
-      data: JSON.stringify({ topic: 'db/query/executed', payload: { rows: 3 } }),
+      data: JSON.stringify({ topic: 'query/executed', payload: { rows: 3 } }),
     });
 
     expect(seen).toEqual([{ rows: 3 }]);

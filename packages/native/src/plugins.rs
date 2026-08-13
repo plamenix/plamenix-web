@@ -717,3 +717,15 @@ const fn log_level_str(level: plamenix_plugin_host::LogLevel) -> &'static str {
 fn plugin_err_to_napi(err: PluginError) -> Error {
     Error::from_reason(err.to_string())
 }
+
+/// Which event patterns any plugin is currently subscribed to.
+///
+/// The browser asks for this so it can forward only the events
+/// something actually wants. Most shell events originate in the UI, so
+/// reaching a WASM plugin costs an HTTP request per event, and
+/// `editor/changed` fires as the user types. With nothing subscribed,
+/// the browser sends nothing.
+#[napi(js_name = "eventPatterns")]
+pub fn event_patterns() -> Vec<String> {
+    bus().subscribed_patterns()
+}

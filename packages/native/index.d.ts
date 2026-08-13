@@ -123,6 +123,17 @@ export declare function describeSchema(sessionId: string): Promise<any>
  */
 export declare function emitEvent(topic: string, payload: string): Promise<any>
 
+/**
+ * Which event patterns any plugin is currently subscribed to.
+ *
+ * The browser asks for this so it can forward only the events
+ * something actually wants. Most shell events originate in the UI, so
+ * reaching a WASM plugin costs an HTTP request per event, and
+ * `editor/changed` fires as the user types. With nothing subscribed,
+ * the browser sends nothing.
+ */
+export declare function eventPatterns(): Array<string>
+
 export declare function execute(sessionId: string, sql: string): Promise<any>
 
 /**
