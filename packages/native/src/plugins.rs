@@ -315,6 +315,11 @@ pub async fn emit_event(topic: String, payload: String) -> Result<serde_json::Va
                 DispatchOutcome::Delivered => ("delivered", None, None),
                 DispatchOutcome::NotInstantiated => ("notInstantiated", None, None),
                 DispatchOutcome::Closed => ("closed", None, None),
+                // Subscribed to a topic whose payload it has no
+                // capability to see. Reported so the plugins panel can
+                // say why nothing arrives, rather than looking healthy
+                // and silent.
+                DispatchOutcome::NotPermitted(reason) => ("notPermitted", None, Some(reason.clone())),
                 // `reason` separates a plugin that was too slow from one
                 // that trapped. `detail` is the whole error chain, which
                 // is where the wasm backtrace lives.

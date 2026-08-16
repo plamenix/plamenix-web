@@ -1,10 +1,8 @@
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import * as fbclient from '@plamenix/native';
-import * as pluginHost from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
 import type { HistoryStore } from '../history/store.js';
-import type { PushEvent } from '../events/channel.js';
 
 const executeBody = z.object({
   sessionId: z.string().uuid(),
@@ -20,7 +18,7 @@ const executeBody = z.object({
   historyLimit: z.number().int().positive().nullable().optional(),
 });
 
-export function executeRoute(history: HistoryStore, push?: (event: PushEvent) => void) {
+export function executeRoute(history: HistoryStore) {
   return async function (app: FastifyInstance): Promise<void> {
     app.post('/api/execute', async (request, reply) => {
       const parsed = executeBody.safeParse(request.body);
@@ -54,19 +52,16 @@ export function executeRoute(history: HistoryStore, push?: (event: PushEvent) =>
         // Mirrors the desktop shell's first producer. Dispatch failures
         // are reported by the host rather than thrown, so a plugin
         // trapping on this event cannot fail the user's query.
-        const executed = {
-          statements: Array.isArray(outcomes) ? outcomes.length : 0,
-          sessionId: parsed.data.sessionId,
-        };
-        try {
-          await pluginHost.emitEvent('query/executed', JSON.stringify(executed));
-        } catch (err) {
-          app.log.warn({ err }, 'failed to dispatch query/executed');
-        }
-        // Same event, out to any attached browser. The desktop shell
-        // gets this through Tauri events; without this the web edition
-        // would dispatch to plugins and tell its own UI nothing.
-        push?.({ topic: 'query/executed', payload: executed });
+        // `query/executed` is emitted by the renderer, not here. It
+        // used to be dispatched to plugins from this route as well,
+        // which meant a plugin received the event twice — once with the
+        // statement count this route knew, and once with the sql, row
+        // count and duration the UI knew. The UI's payload is the one
+        // the catalogue documents.
+        //
+        // It is not pushed either: the client that asked for this
+        // execute already knows it happened, and pushing it back caused
+        // the renderer to forward it to plugins a third time.
 
         return outcomes;
       } catch (err) {

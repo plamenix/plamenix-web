@@ -145,7 +145,7 @@ export async function buildApp(env: Env) {
 
   await app.register(pingRoute);
   await app.register(connectRoute(env));
-  await app.register(executeRoute(historyStore, (event) => events.broadcast(event)));
+  await app.register(executeRoute(historyStore));
   await app.register(exportRoute(env));
   await app.register(transactionRoute);
   await app.register(profilesRoute(profileStore, env));
@@ -170,6 +170,13 @@ export async function buildApp(env: Env) {
     }).then((result) => {
       if (result.expired.length > 0) {
         app.log.info({ count: result.expired.length }, 'closed idle sessions');
+        // The one thing a client genuinely cannot know. It did not ask
+        // for this and gets no response to correlate — without the push
+        // its tab keeps claiming a session the server has already
+        // closed, until the next request fails.
+        for (const sessionId of result.expired) {
+          events.broadcast({ topic: 'session/expired', payload: { sessionId } });
+        }
       }
     });
   }, env.SESSION_SWEEP_MS);
