@@ -30,7 +30,15 @@ use semver::Version;
 /// Host version surfaced to plugins via the `host.host-version` import.
 /// Mirrored from the workspace `1.0.0-beta` line; bump in lockstep when
 /// the host version moves.
-const HOST_VERSION: &str = "1.0.0-beta";
+/// The version this edition reports to the plugin compatibility gate.
+///
+/// Read from the crate rather than written out. It used to be the
+/// literal `"1.0.0-beta"` while the desktop shell reported its own
+/// `CARGO_PKG_VERSION`, `"1.0.0-beta.0"` — and semver orders
+/// `1.0.0-beta` *below* `1.0.0-beta.0`, so a plugin declaring
+/// `plamenix_min_version = ">=1.0.0-beta.0"` loaded on desktop and was
+/// refused here. Same bundle, same manifest, two answers.
+const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Edition string returned to plugins via the `host.edition` import.
 const EDITION: &str = "web";
