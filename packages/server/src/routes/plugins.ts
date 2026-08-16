@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import * as pluginHost from '@plamenix/native';
 import type { PluginGrantStore } from '../plugins/grants.js';
+import { sessionStore } from '../sessions/store.js';
 import { assertSafePluginId } from '../plugins/storage.js';
 
 export interface PluginsRouteOptions {
@@ -19,6 +20,16 @@ const emitEventBody = z.object({
   /** Already JSON, and passed through as a string — the host takes a
    *  string and re-parsing here would only be a chance to change it. */
   payload: z.string().max(64 * 1024),
+  /** The session the event is about. Makes a subscribing plugin's `db`
+   *  capability usable while it handles the event — without it the host
+   *  has no session to answer "the one I called you for" with, and
+   *  every `db` import refuses.
+   *
+   *  Checked against the live session store rather than trusted: it
+   *  reaches plugins as the session their queries run against, so a
+   *  value invented by a caller would be a way to point a plugin at
+   *  somebody else's attachment. */
+  sessionId: z.string().uuid().optional(),
 });
 
 const idParam = z.object({ id: z.string().min(1) });
@@ -269,7 +280,18 @@ export function pluginsRoute(options: PluginsRouteOptions) {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
       }
-      const deliveries = await pluginHost.emitEvent(parsed.data.topic, parsed.data.payload);
+      // An unknown session is dropped rather than refused: the event
+      // is still worth delivering, the plugin simply gets no db access
+      // for it. Refusing would let a stale tab silence its own events.
+      const sessionId =
+        parsed.data.sessionId !== undefined && sessionStore.has(parsed.data.sessionId)
+          ? parsed.data.sessionId
+          : undefined;
+      const deliveries = await pluginHost.emitEvent(
+        parsed.data.topic,
+        parsed.data.payload,
+        sessionId,
+      );
       return { deliveries };
     });
 

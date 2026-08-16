@@ -120,8 +120,20 @@ export declare function describeSchema(sessionId: string): Promise<any>
  * the caller can see who was reached and what the supervisor made of
  * any failure — a plugin trapping on an event must not fail the
  * request that produced it.
+ * `session_id` names the session the event is about, and is what makes
+ * a plugin's `db` capability usable while handling one. Without it,
+ * every `db` import refuses: the host answers "the session I called
+ * you for" and there is none. The desktop shell has always set this;
+ * this edition did not, so a plugin granted `db.read.any` could
+ * receive an event and then be denied the access the install dialog
+ * told the user it had.
+ *
+ * Scoped to the dispatch rather than left set. The slot is per plugin
+ * and this edition serves more than one caller, so a value left behind
+ * would show the next request's plugin call a session belonging to
+ * somebody else. Cleared on the way out whatever the dispatch did.
  */
-export declare function emitEvent(topic: string, payload: string): Promise<any>
+export declare function emitEvent(topic: string, payload: string, sessionId?: string | undefined | null): Promise<any>
 
 /**
  * Which event patterns any plugin is currently subscribed to.

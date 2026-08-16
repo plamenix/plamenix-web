@@ -1036,11 +1036,11 @@ export function App() {
   useEffect(refreshPluginEventPatterns, [refreshPluginEventPatterns]);
   usePluginEventForwarding({
     subscribedPatterns: pluginEventPatterns,
-    forward: (topic, payload) => {
+    forward: (topic, payload, sessionId) => {
       void fetch('/api/plugins/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ topic, payload }),
+        body: JSON.stringify({ topic, payload, sessionId }),
       }).catch(() => {
         // A plugin trapping on an event must not disturb the
         // interaction that produced it; the supervisor records it.

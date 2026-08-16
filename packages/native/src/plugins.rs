@@ -304,10 +304,28 @@ pub async fn activate_plugin(plugin_id: String) -> Result<ActivatedPluginInfo> {
 /// the caller can see who was reached and what the supervisor made of
 /// any failure — a plugin trapping on an event must not fail the
 /// request that produced it.
+/// `session_id` names the session the event is about, and is what makes
+/// a plugin's `db` capability usable while handling one. Without it,
+/// every `db` import refuses: the host answers "the session I called
+/// you for" and there is none. The desktop shell has always set this;
+/// this edition did not, so a plugin granted `db.read.any` could
+/// receive an event and then be denied the access the install dialog
+/// told the user it had.
+///
+/// Scoped to the dispatch rather than left set. The slot is per plugin
+/// and this edition serves more than one caller, so a value left behind
+/// would show the next request's plugin call a session belonging to
+/// somebody else. Cleared on the way out whatever the dispatch did.
 #[napi(js_name = "emitEvent")]
-pub async fn emit_event(topic: String, payload: String) -> Result<serde_json::Value> {
+pub async fn emit_event(
+    topic: String,
+    payload: String,
+    session_id: Option<String>,
+) -> Result<serde_json::Value> {
+    set_event_session(session_id.clone());
     let deliveries =
         dispatch_event_supervised(bus(), instances(), supervisor(), &topic, &payload).await;
+    set_event_session(None);
     let view: Vec<serde_json::Value> = deliveries
         .into_iter()
         .map(|d| {
@@ -525,6 +543,22 @@ pub async fn set_call_context(plugin_id: String, session_id: String) -> Result<(
         .ok_or_else(|| Error::from_reason(format!("plugin `{plugin_id}` not loaded")))?;
     *entry.session_slot.lock().expect("session slot mutex") = Some(session_id);
     Ok(())
+}
+
+/// Points every loaded plugin at one session, or clears them all.
+///
+/// Event dispatch reaches whichever plugins subscribed, which the
+/// caller does not know, so this sets the slot across the registry
+/// rather than per plugin. A poisoned mutex is skipped rather than
+/// panicked on: failing to set a session must not take down the
+/// request that produced the event.
+fn set_event_session(session_id: Option<String>) {
+    let Ok(reg) = registry().lock() else { return };
+    for entry in reg.values() {
+        if let Ok(mut slot) = entry.session_slot.lock() {
+            *slot = session_id.clone();
+        }
+    }
 }
 
 /// Clears the per-call session identifier for the named plugin.
