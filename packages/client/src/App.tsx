@@ -7,11 +7,15 @@ import {
   recordExec,
 } from './app-helpers.js';
 import {
+  copyText,
+  historyKeyOf,
+  useToastStore,
   ConfirmationModal,
   ConnectionScreen,
   DdlViewerModal,
   ErrorBanner,
   DatabaseExportModal,
+  HistoryButton,
   HistoryPanel,
   MultiResultView,
   NewObjectModal,
@@ -200,9 +204,12 @@ export function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const openHistory = useCallback(async () => {
-    const pid = activeTab.selectedProfileId;
-    if (!pid) return;
     setHistoryOpen(true);
+
+    // Opens even with nowhere to read from — the panel explains why it
+    // is empty. Returning early made the button silently do nothing for
+    // a session connected without a saved profile.
+    const pid = historyKeyOf(activeTab.selectedProfileId, activeTab.form);
     setHistoryLoading(true);
     try {
       const res = await fetchTransport.invoke<HistoryEntry[]>('history-list', {
@@ -219,8 +226,7 @@ export function App() {
   }, [activeTab, activeTabId, patchTab]);
 
   const clearHistory = useCallback(async () => {
-    const pid = activeTab.selectedProfileId;
-    if (!pid) return;
+    const pid = historyKeyOf(activeTab.selectedProfileId, activeTab.form);
     try {
       await fetchTransport.invoke<{ cleared: number }>('history-clear', {
         profileId: pid,
@@ -564,7 +570,7 @@ export function App() {
       const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
         sessionId: tab.sessionId,
         sql,
-        profileId: tab.selectedProfileId ?? undefined,
+        profileId: historyKeyOf(tab.selectedProfileId, tab.form),
         historyLimit: currentHistoryLimit(),
       });
       patchTab(tabId, { results: res, executedSql: sql, focusedObjectName: null });
@@ -603,7 +609,7 @@ export function App() {
         const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
         firstAffected(outcomes, 'UPDATE');
@@ -640,7 +646,7 @@ export function App() {
         const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
         for (const outcome of outcomes) {
@@ -759,7 +765,7 @@ export function App() {
         const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
         // Show the data in the result panel without touching the editor
@@ -778,7 +784,7 @@ export function App() {
   );
 
   const handleApplyFilter = useCallback(
-    async (sql: string) => {
+    async (sql: string, options?: { recordHistory?: boolean }) => {
       const tabId = activeTabId;
       const tab = activeTab;
       if (!tab.sessionId) return;
@@ -789,7 +795,13 @@ export function App() {
         const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          // Omitted for the automatic re-read after a write: history is
+          // what the user ran, and the host skips recording when there
+          // is no key.
+          profileId:
+            options?.recordHistory === false
+              ? undefined
+              : historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
         patchTab(tabId, { results: res, executedSql: sql });
@@ -819,7 +831,7 @@ export function App() {
         fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         }),
       patch: (patch) => patchTab(tabId, patch),
@@ -1102,6 +1114,14 @@ export function App() {
           />
         </div>
         <div className="flex shrink-0 items-stretch border-b border-edge">
+          {/* This edition's shell has no Home/Menu pair to sit between,
+              so History goes beside Settings. It opens the dialog rather
+              than a pane: there is no pane switch here to own one, and
+              the point is the same either way — history was reachable
+              only by a keyboard shortcut nobody was told about. */}
+          {activeTab.sessionId !== null && (
+            <HistoryButton active={historyOpen} onClick={() => void openHistory()} />
+          )}
           <SettingsButton onOpenDetailed={() => setShowSettings(true)} />
         </div>
       </div>
@@ -1321,7 +1341,7 @@ interface SessionViewProps {
   onCommitDdl: (sql: string) => Promise<void>;
   onFetchTableExport: (table: TableInfo) => Promise<TableExportPart>;
   onStreamedExport: StreamedExportRunner;
-  onApplyFilter: (sql: string) => Promise<void>;
+  onApplyFilter: (sql: string, options?: { recordHistory?: boolean }) => Promise<void>;
   onColumnWidthsChange: (next: Record<string, number>) => void;
   onFetchBlob: (blobId: string) => Promise<string>;
   onCountAllRows: (args: { table: string; predicate: string | null }) => Promise<number>;
@@ -1404,13 +1424,15 @@ function SessionView({
               schema={tab.schema}
               busy={tab.busy}
               onRefresh={onRefreshSchema}
-              onSelect={(id) =>
-                onSqlChange(
-                  tab.sql.length > 0 && !tab.sql.endsWith(' ')
-                    ? `${tab.sql} ${id}`
-                    : `${tab.sql}${id}`,
-                )
-              }
+              onCopyIdentifier={(identifier, label) => {
+                void copyText(identifier).then((ok) => {
+                  useToastStore.getState().push({
+                    kind: 'notice',
+                    tone: ok ? 'success' : 'error',
+                    title: ok ? `Copied ${label}` : `Could not copy ${label}`,
+                  });
+                });
+              }}
               onOpenObject={(target) => {
                 if (target.kind === 'table') {
                   void onBrowseTable(target.name);
