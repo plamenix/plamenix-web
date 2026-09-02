@@ -1,6 +1,6 @@
 {
   "name": "@plamenix/native",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta",
   "description": "NAPI bindings for the Plamenix web edition: the Firebird driver and the WASM plugin host, in one native module so they share one driver instance.",
   "main": "index.js",
   "types": "index.d.ts",

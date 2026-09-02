@@ -127,7 +127,7 @@ interface CryptStateResponse {
 // I6 event-bus identity. Keep in sync with package.json version on
 // release-prep (no live import yet — vite JSON imports work but
 // require the workspace to expose package.json to the bundler).
-const HOST_VERSION = '1.0.0-beta.0';
+const HOST_VERSION = '1.0.0-beta';
 const EDITION = 'web' as const;
 
 export function App() {
