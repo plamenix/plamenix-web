@@ -47,7 +47,7 @@ export function historyRoute(store: HistoryStore) {
           issues: parsed.error.issues,
         });
       }
-      return store.list(parsed.data.profileId, parsed.data.limit);
+      return await store.list(parsed.data.profileId, parsed.data.limit);
     });
 
     app.post('/api/history-clear', async (request, reply) => {
@@ -58,7 +58,7 @@ export function historyRoute(store: HistoryStore) {
           issues: parsed.error.issues,
         });
       }
-      const cleared = store.clear(parsed.data.profileId);
+      const cleared = await store.clear(parsed.data.profileId);
       return { cleared };
     });
 
@@ -70,7 +70,7 @@ export function historyRoute(store: HistoryStore) {
           issues: parsed.error.issues,
         });
       }
-      const updated = store.setLabel(parsed.data.id, parsed.data.label ?? null);
+      const updated = await store.setLabel(parsed.data.id, parsed.data.label ?? null);
       return { updated };
     });
 
@@ -82,7 +82,7 @@ export function historyRoute(store: HistoryStore) {
           issues: parsed.error.issues,
         });
       }
-      const removed = store.delete(parsed.data.id);
+      const removed = await store.delete(parsed.data.id);
       return { removed };
     });
 
@@ -94,7 +94,7 @@ export function historyRoute(store: HistoryStore) {
           issues: parsed.error.issues,
         });
       }
-      const removed = store.deleteMany(parsed.data.ids);
+      const removed = await store.deleteMany(parsed.data.ids);
       return { removed };
     });
   };

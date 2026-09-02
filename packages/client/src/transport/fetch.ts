@@ -17,15 +17,56 @@ import { TransportError } from '@plamenix/ui';
  * On a network failure (DNS, offline, CORS), the rejection carries the
  * underlying exception as `cause`.
  */
+/**
+ * The API token the server injected into this document.
+ *
+ * Read once. A missing or unreplaced placeholder yields `null`, and
+ * requests go out unauthenticated so the failure is a clear 401 rather
+ * than a header containing the literal placeholder.
+ */
+function apiToken(): string | null {
+  const meta = document.querySelector('meta[name="plamenix-api-token"]');
+  const value = meta?.getAttribute('content') ?? '';
+  if (value === '' || value.startsWith('__')) return null;
+  return value;
+}
+
+const API_TOKEN = apiToken();
+
+/**
+ * Headers every API request must carry.
+ *
+ * Exported because several call sites reach `/api/*` with raw `fetch`
+ * rather than through {@link fetchTransport}. Each of those would 401
+ * without this, and the failure would look like a broken endpoint
+ * rather than a missing header — so there is one source for it.
+ */
+export function authHeaders(): Record<string, string> {
+  return API_TOKEN === null ? {} : { Authorization: `Bearer ${API_TOKEN}` };
+}
+
+/**
+ * The raw token, for the one caller that cannot use a header.
+ *
+ * The browser `WebSocket` constructor takes a URL and a subprotocol
+ * list and nothing else, so the push channel has to carry the token as
+ * a subprotocol. Exported narrowly rather than making `API_TOKEN`
+ * public: there is exactly one legitimate reason to want the bare
+ * value, and everything else should go through {@link authHeaders}.
+ */
+export function apiTokenForUpgrade(): string | null {
+  return API_TOKEN;
+}
+
 export const fetchTransport: Transport = {
   async invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     const url = `/api/${command}`;
     const init: RequestInit =
       args === undefined
-        ? { method: 'GET' }
+        ? { method: 'GET', headers: authHeaders() }
         : {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify(args),
           };
 

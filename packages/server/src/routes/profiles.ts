@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as fbclient from '@plamenix/fbclient-node';
-import type { ConnectionConfig } from '@plamenix/fbclient-node';
+import * as fbclient from '@plamenix/native';
+import type { ConnectionConfig } from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
+import type { Env } from '../env.js';
 import type { ProfileDraft, ProfileStore } from '../profiles/store.js';
 
 const saveBody = z.object({
@@ -15,7 +16,6 @@ const saveBody = z.object({
   encryptionRequired: z.boolean().default(false),
   pureRust: z.boolean().default(false),
   color: z.string().optional(),
-  fbclientPath: z.string().optional(),
   charset: z.string().optional(),
 });
 
@@ -24,11 +24,10 @@ const connectBody = z.object({
   encryptionKey: z.string().optional(),
   pureRust: z.boolean().optional(),
   encryptionRequired: z.boolean().optional(),
-  fbclientPath: z.string().optional(),
   charset: z.string().optional(),
 });
 
-export function profilesRoute(store: ProfileStore) {
+export function profilesRoute(store: ProfileStore, env: Env) {
   return async function register(app: FastifyInstance): Promise<void> {
     app.get('/api/profiles', async () => ({ profiles: await store.list() }));
 
@@ -51,9 +50,6 @@ export function profilesRoute(store: ProfileStore) {
       }
       if (parsed.data.color !== undefined) {
         draft.color = parsed.data.color;
-      }
-      if (parsed.data.fbclientPath !== undefined) {
-        draft.fbclientPath = parsed.data.fbclientPath;
       }
       if (parsed.data.charset !== undefined) {
         draft.charset = parsed.data.charset;
@@ -103,9 +99,12 @@ export function profilesRoute(store: ProfileStore) {
         if (parsed.data.encryptionKey !== undefined) {
           config.encryptionKey = parsed.data.encryptionKey;
         }
-        const fbclientPath = parsed.data.fbclientPath ?? profile.fbclientPath ?? null;
-        if (typeof fbclientPath === 'string' && fbclientPath.length > 0) {
-          config.fbclientPath = fbclientPath;
+        // Server configuration only. A stored profile could still
+        // carry an `fbclientPath` written before this route stopped
+        // accepting one, and honouring it would leave the original hole
+        // open to anyone who had already planted a value.
+        if (env.FBCLIENT_PATH !== undefined) {
+          config.fbclientPath = env.FBCLIENT_PATH;
         }
         const charset = parsed.data.charset ?? profile.charset ?? null;
         if (typeof charset === 'string' && charset.length > 0) {

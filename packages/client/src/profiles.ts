@@ -1,3 +1,4 @@
+import { authHeaders } from './transport/fetch.js';
 // Profile-REST helpers for the web client.
 //
 // The shared `fetchTransport` is a thin JSON-RPC-shaped wrapper over
@@ -43,7 +44,7 @@ async function expectOk(response: Response, label: string): Promise<void> {
 }
 
 export async function listProfiles(): Promise<Profile[]> {
-  const res = await fetch('/api/profiles');
+  const res = await fetch('/api/profiles', { headers: authHeaders() });
   await expectOk(res, 'list profiles');
   const body = (await res.json()) as { profiles: Profile[] };
   return body.profiles;
@@ -52,7 +53,7 @@ export async function listProfiles(): Promise<Profile[]> {
 export async function saveProfile(draft: ProfileDraft): Promise<Profile> {
   const res = await fetch('/api/profiles', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(draft),
   });
   await expectOk(res, 'save profile');
@@ -61,14 +62,14 @@ export async function saveProfile(draft: ProfileDraft): Promise<Profile> {
 }
 
 export async function deleteProfile(id: string): Promise<void> {
-  const res = await fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
   await expectOk(res, 'delete profile');
 }
 
 export async function touchProfileDisconnected(id: string): Promise<void> {
   const res = await fetch(
     `/api/profiles/${encodeURIComponent(id)}/touch-disconnected`,
-    { method: 'POST' },
+    { method: 'POST', headers: authHeaders() },
   );
   await expectOk(res, 'touch profile disconnected');
 }
@@ -79,7 +80,7 @@ export async function connectByProfile(
 ): Promise<{ sessionId: string }> {
   const res = await fetch(`/api/profiles/${encodeURIComponent(id)}/connect`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(args),
   });
   await expectOk(res, 'profile connect');

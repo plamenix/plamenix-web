@@ -8,7 +8,6 @@ dist/
 # Rust / NAPI
 target/
 **/*.rs.bk
-packages/fbclient-node/*.node
 packages/fbclient-node/npm/
 
 # Editors
@@ -23,3 +22,13 @@ packages/fbclient-node/npm/
 
 # OS
 Thumbs.db
+
+# Plugin grant store (runtime artifact)
+packages/server/plugin-grants.sqlite
+packages/server/plugin-grants.sqlite-shm
+packages/server/plugin-grants.sqlite-wal
+
+
+# napi build output. Platform-specific, ~60 MB, and rebuilt by
+# `pnpm build` in packages/native.
+*.node

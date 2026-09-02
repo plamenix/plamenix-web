@@ -2,7 +2,8 @@ import { describe, it, expect, afterAll, beforeAll, beforeEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildApp, type App } from '../src/app.js';
+import { buildAuthedApp } from './helpers/authed.js';
+import { type App } from '../src/app.js';
 import { loadEnv } from '../src/env.js';
 
 describe('profile routes', () => {
@@ -11,13 +12,11 @@ describe('profile routes', () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'plamenix-profiles-'));
-    app = await buildApp(
-      loadEnv({
+    app = await buildAuthedApp({
         NODE_ENV: 'test',
         LOG_LEVEL: 'error',
         PROFILES_PATH: join(tmpDir, 'profiles.json'),
-      } as NodeJS.ProcessEnv),
-    );
+      });
     await app.ready();
   });
 

@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as fbclient from '@plamenix/fbclient-node';
-import type { ConnectionConfig } from '@plamenix/fbclient-node';
+import * as fbclient from '@plamenix/native';
+import type { ConnectionConfig } from '@plamenix/native';
 import { sessionStore } from '../sessions/store.js';
+import type { Env } from '../env.js';
 
 const connectBody = z.object({
   host: z.string().min(1),
@@ -11,13 +12,27 @@ const connectBody = z.object({
   user: z.string().min(1),
   password: z.string(),
   encryptionKey: z.string().optional(),
-  fbclientPath: z.string().optional(),
   charset: z.string().optional(),
   encryptionRequired: z.boolean().default(false),
   pureRust: z.boolean().default(false),
 });
 
-export async function connectRoute(app: FastifyInstance): Promise<void> {
+/**
+ * `POST /api/connect`.
+ *
+ * Takes the `fbclient` library path from server configuration, never
+ * from the request. The body used to carry `fbclientPath`, and
+ * `resolve_fbclient_path` gives an explicit config value precedence
+ * over the server's own environment variable — so anyone who could
+ * reach this endpoint could name any file on the server's filesystem
+ * and have the process dlopen it. There is no authentication on this
+ * route, and until recently the server bound to 0.0.0.0.
+ *
+ * Which library a server loads is the operator's decision. A client
+ * asking for one is never a question worth honouring.
+ */
+export function connectRoute(env: Env) {
+  return async function register(app: FastifyInstance): Promise<void> {
   app.post('/api/connect', async (request, reply) => {
     const parsed = connectBody.safeParse(request.body);
     if (!parsed.success) {
@@ -36,8 +51,8 @@ export async function connectRoute(app: FastifyInstance): Promise<void> {
       if (parsed.data.encryptionKey !== undefined) {
         config.encryptionKey = parsed.data.encryptionKey;
       }
-      if (parsed.data.fbclientPath !== undefined) {
-        config.fbclientPath = parsed.data.fbclientPath;
+      if (env.FBCLIENT_PATH !== undefined) {
+        config.fbclientPath = env.FBCLIENT_PATH;
       }
       if (parsed.data.charset !== undefined && parsed.data.charset !== '') {
         config.charset = parsed.data.charset;
@@ -56,4 +71,5 @@ export async function connectRoute(app: FastifyInstance): Promise<void> {
       });
     }
   });
+  };
 }

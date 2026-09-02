@@ -1,12 +1,13 @@
 import { describe, it, expect, afterAll, beforeAll } from 'vitest';
-import { buildApp, type App } from '../src/app.js';
+import { buildAuthedApp } from './helpers/authed.js';
+import { type App } from '../src/app.js';
 import { loadEnv } from '../src/env.js';
 
 describe('plamenix-web server', () => {
   let app: App;
 
   beforeAll(async () => {
-    app = await buildApp(loadEnv({ NODE_ENV: 'test', LOG_LEVEL: 'error' } as NodeJS.ProcessEnv));
+    app = await buildAuthedApp();
     await app.ready();
   });
 

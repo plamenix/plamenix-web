@@ -1,10 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CommandPalette,
+  currentHistoryLimit,
+  deriveTitle,
+  formatRelative,
+  recentKeyOf,
+  recordExec,
+} from './app-helpers.js';
+import {
+  copyText,
+  historyKeyOf,
+  useToastStore,
+  ConfirmationModal,
   ConnectionScreen,
   DdlViewerModal,
   ErrorBanner,
   DatabaseExportModal,
+  HistoryButton,
   HistoryPanel,
   MultiResultView,
   NewObjectModal,
@@ -14,28 +25,58 @@ import {
   notifyMutations,
   SchemaBrowser,
   SchemaEditorModal,
-  schemaDdl,
   sourceQuery,
   SettingsButton,
   SettingsPage,
   TableObjectView,
-  SearchPalette,
   StatsDashboard,
-  StatusBar,
   swatchFor,
   TabStrip,
   WelcomeDashboard,
-  resolveHistoryLimit,
-  ShortcutsCheatSheet,
   getModKeyLabel,
-  isTypingTarget,
+  useConnectionActions,
+  useShellCommands,
+  resolveStatement,
+  dispatchSchemaDdl,
+  applySchemaAction,
+  useSessionRefreshers,
+  quoteIdentifier,
+  abandonStatement,
+  abandonNeedsConfirmation,
+  describeAbandonCost,
+  isStaleSession,
+  countFromCell,
+  runGuardedExport,
+  ShellOverlays,
+  appendIdentifier,
+  profileToForm,
+  firstRows,
+  firstAffected,
+  type ConnectionAdapter,
+  installPluginInterceptors,
+  type ExtensionPoint,
+  type PluginInterceptorOutcome,
+  installDestructiveDropInterceptor,
+  setConfirmationProvider,
+  type ConfirmationRequest,
+  type PendingConfirmation,
+  emitEditorFocused,
+  emitEditorSelectionChanged,
+  useDefaultKeybindings,
+  useBuiltinContributions,
+  usePluginEventForwarding,
   useConnectionPrefs,
+  useEmitConnectionEvents,
+  useEmitEditorEvents,
+  useEmitLifecycleEvents,
+  useEmitQueryEvents,
+  useEmitSchemaEvents,
+  useEmitSettingsThemeEvents,
+  useEmitTabEvents,
   useResolvedThemeMode,
-  useHealthProbe,
   useRecentQueries,
   useTabsStore,
   useThemeStore,
-  type Command,
   type ConnectionForm,
   type ColumnValue,
   type CryptState,
@@ -55,23 +96,16 @@ import {
   type StatementOutcome,
   type TabState,
   type SchemaAction,
+  type SchemaDdl,
   type TestConnectionResult,
+  TransactionBar,
+  hasUncommittedWork,
+  type TxConfig,
+  type TxMode,
+  type TxStatus,
 } from '@plamenix/ui';
-import {
-  History,
-  Keyboard,
-  LogOut,
-  Moon,
-  PanelLeftClose,
-  Play,
-  Plug,
-  Plus,
-  RefreshCw,
-  Save,
-  Sun,
-  X,
-} from 'lucide-react';
-import { fetchTransport } from '@/transport/fetch';
+import { authHeaders, fetchTransport } from '@/transport/fetch';
+import { connectEventChannel } from '@/events/channel';
 import {
   connectByProfile,
   deleteProfile,
@@ -90,78 +124,60 @@ interface CryptStateResponse {
   state: CryptState;
 }
 
-function deriveTitle(form: ConnectionForm): string {
-  const last = form.database.split(/[\\/]/).pop() ?? form.database;
-  return `${form.host}/${last}`;
-}
-
-/** Snapshot the persisted history-retention preference at call time so
- *  the dispatched execute carries the latest cap without forcing the
- *  surrounding `useCallback` to re-subscribe on every settings tweak. */
-function currentHistoryLimit(): number | null {
-  return resolveHistoryLimit(useConnectionPrefs.getState().queryHistoryLimit);
-}
-
-/** Stable key for the welcome-dashboard recent-queries bucket. Prefers
- *  the profile name so multiple tabs against the same profile share a
- *  list; falls back to host/db so anonymous connections still bucket
- *  cleanly. */
-function recentKeyOf(form: ConnectionForm, profileName: string): string {
-  const trimmed = profileName.trim();
-  return trimmed.length > 0 ? trimmed : deriveTitle(form);
-}
-
-function recordExec(
-  key: string,
-  sql: string,
-  startedAt: number,
-  outcomes: StatementOutcome[] | null,
-  err: string | null,
-): void {
-  const durationMs = Date.now() - startedAt;
-  let status: 'ok' | 'err' = 'ok';
-  let rowCount: number | null = null;
-  let errMsg: string | null = null;
-  if (err !== null) {
-    status = 'err';
-    errMsg = err;
-  } else if (outcomes && outcomes.length > 0) {
-    const failed = outcomes.find((o) => o.status === 'err');
-    if (failed && failed.status === 'err') {
-      status = 'err';
-      errMsg = failed.error;
-    } else {
-      const last = outcomes[outcomes.length - 1];
-      if (last && last.status === 'ok') {
-        if ('Rows' in last.result) rowCount = last.result.Rows.rows.length;
-        else if ('Affected' in last.result) rowCount = last.result.Affected.rows;
-      }
-    }
-  }
-  useRecentQueries.getState().record(key, {
-    sql,
-    executedAt: startedAt,
-    durationMs,
-    status,
-    rowCount,
-    error: errMsg,
-  });
-}
-
-/** Renders an epoch-ms timestamp as a short relative-time string. The
- *  unused `_tick` argument forces a re-render when the parent's ticker
- *  advances; the value itself is discarded. */
-function formatRelative(at: number, _tick: number): string {
-  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (seconds < 1) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  return `${hours}h ago`;
-}
+// I6 event-bus identity. Keep in sync with package.json version on
+// release-prep (no live import yet — vite JSON imports work but
+// require the workspace to expose package.json to the bundler).
+const HOST_VERSION = '1.0.0-beta.0';
+const EDITION = 'web' as const;
 
 export function App() {
+  // I6.3-I6.6 + I6.8 + I6.10 + I6.11 — mount the seven event-bridge
+  // hooks once at the App root. Each hook subscribes to its source
+  // store + diffs/emits on every relevant transition. Order is
+  // arbitrary; hooks are independent.
+  useEmitLifecycleEvents({ edition: EDITION, hostVersion: HOST_VERSION });
+  useEmitTabEvents();
+  useEmitConnectionEvents();
+  useEmitQueryEvents();
+  useEmitSchemaEvents();
+  useEmitSettingsThemeEvents();
+  useEmitEditorEvents();
+
+  // I6.12 — confirmation queue + provider + built-in destructive-DROP
+  // interceptor. The queue keeps multiple in-flight confirmations
+  // ordered; each user action resolves exactly one request.
+  const [confirmQueue, setConfirmQueue] = useState<
+    Array<PendingConfirmation & { resolve: (v: boolean) => void }>
+  >([]);
+  useEffect(() => {
+    setConfirmationProvider(
+      (req: ConfirmationRequest) =>
+        new Promise<boolean>((resolve) => {
+          setConfirmQueue((q) => [...q, { ...req, resolve }]);
+        }),
+    );
+    const dropReg = installDestructiveDropInterceptor();
+    return () => {
+      setConfirmationProvider(null);
+      dropReg.dispose();
+    };
+  }, []);
+  const confirmHead = confirmQueue[0] ?? null;
+  const onConfirmHead = useCallback(() => {
+    setConfirmQueue((q) => {
+      const [head, ...rest] = q;
+      head?.resolve(true);
+      return rest;
+    });
+  }, []);
+  const onCancelHead = useCallback(() => {
+    setConfirmQueue((q) => {
+      const [head, ...rest] = q;
+      head?.resolve(false);
+      return rest;
+    });
+  }, []);
+
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const newTab = useTabsStore((s) => s.newTab);
@@ -188,9 +204,12 @@ export function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const openHistory = useCallback(async () => {
-    const pid = activeTab.selectedProfileId;
-    if (!pid) return;
     setHistoryOpen(true);
+
+    // Opens even with nowhere to read from — the panel explains why it
+    // is empty. Returning early made the button silently do nothing for
+    // a session connected without a saved profile.
+    const pid = historyKeyOf(activeTab.selectedProfileId, activeTab.form);
     setHistoryLoading(true);
     try {
       const res = await fetchTransport.invoke<HistoryEntry[]>('history-list', {
@@ -207,8 +226,7 @@ export function App() {
   }, [activeTab, activeTabId, patchTab]);
 
   const clearHistory = useCallback(async () => {
-    const pid = activeTab.selectedProfileId;
-    if (!pid) return;
+    const pid = historyKeyOf(activeTab.selectedProfileId, activeTab.form);
     try {
       await fetchTransport.invoke<{ cleared: number }>('history-clear', {
         profileId: pid,
@@ -219,27 +237,19 @@ export function App() {
     }
   }, [activeTab, activeTabId, patchTab]);
 
-  const deleteHistoryEntry = useCallback(
-    async (id: number) => {
-      await fetchTransport.invoke<{ removed: boolean }>('history-delete', { id });
-      setHistoryEntries((prev) => (prev ? prev.filter((e) => e.id !== id) : prev));
-    },
-    [],
-  );
+  const deleteHistoryEntry = useCallback(async (id: number) => {
+    await fetchTransport.invoke<{ removed: boolean }>('history-delete', { id });
+    setHistoryEntries((prev) => (prev ? prev.filter((e) => e.id !== id) : prev));
+  }, []);
 
-  const deleteHistoryEntries = useCallback(
-    async (ids: number[]) => {
-      if (ids.length === 0) return;
-      await fetchTransport.invoke<{ removed: number }>('history-delete-many', {
-        ids,
-      });
-      const drop = new Set(ids);
-      setHistoryEntries((prev) =>
-        prev ? prev.filter((e) => !drop.has(e.id)) : prev,
-      );
-    },
-    [],
-  );
+  const deleteHistoryEntries = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) return;
+    await fetchTransport.invoke<{ removed: number }>('history-delete-many', {
+      ids,
+    });
+    const drop = new Set(ids);
+    setHistoryEntries((prev) => (prev ? prev.filter((e) => !drop.has(e.id)) : prev));
+  }, []);
 
   const setHistoryLabel = useCallback(
     async (id: number, label: string | null) => {
@@ -247,8 +257,7 @@ export function App() {
         id,
         label,
       });
-      const normalized =
-        label && label.trim().length > 0 ? label.trim() : null;
+      const normalized = label && label.trim().length > 0 ? label.trim() : null;
       let matched: { sql: string; executedAt: number } | null = null;
       setHistoryEntries((prev) => {
         if (!prev) return prev;
@@ -332,18 +341,7 @@ export function App() {
       selectedProfileId: id,
       profileName: profile.name,
       profileColor: profile.color ?? null,
-      form: {
-        host: profile.host,
-        port: profile.port,
-        database: profile.database,
-        user: profile.user,
-        password: '',
-        pureRust: profile.pureRust,
-        encryptionKey: '',
-        encryptionRequired: profile.encryptionRequired,
-        fbclientPath: profile.fbclientPath ?? '',
-        charset: profile.charset ?? 'UTF8',
-      },
+      form: profileToForm(profile),
     });
   };
 
@@ -405,253 +403,197 @@ export function App() {
   };
 
   const handleQuickConnect = async (profileId: string) => {
-    const tabId = activeTabId;
     const profile = profiles.find((p) => p.id === profileId);
     if (!profile) return;
-    patchTab(tabId, {
-      error: null,
-      busy: true,
-      cryptState: null,
-      selectedProfileId: profileId,
-      profileName: profile.name,
-      form: {
-        ...activeTab.form,
-        host: profile.host,
-        port: profile.port,
-        database: profile.database,
-        user: profile.user,
-        encryptionRequired: profile.encryptionRequired,
-        pureRust: profile.pureRust,
+    await quickConnect(profile);
+  };
+
+  // Connect, reconnect, test, the health probe and auto-reconnect live
+  // in `@plamenix/ui` now. The desktop shell ran a near-identical copy
+  // of every one of them, and one of the two had already drifted. What
+  // stays here is what is genuinely this edition's: HTTP endpoints, the
+  // profile route that keeps the password out of the URL, and
+  // `undefined` rather than `null` for an absent optional field.
+  const connectionAdapter = useMemo<ConnectionAdapter>(
+    () => ({
+      connect: ({ form, profileId }) => {
+        if (profileId !== null) {
+          const args: ProfileConnectArgs = {
+            password: form.password,
+            pureRust: form.pureRust,
+            encryptionRequired: form.encryptionRequired,
+          };
+          if (form.encryptionKey !== '') args.encryptionKey = form.encryptionKey;
+          if (form.fbclientPath !== '') args.fbclientPath = form.fbclientPath;
+          if (form.charset !== '') args.charset = form.charset;
+          return connectByProfile(profileId, args);
+        }
+        return fetchTransport.invoke<ConnectResponse>('connect', {
+          host: form.host,
+          port: form.port,
+          database: form.database,
+          user: form.user,
+          password: form.password,
+          encryptionKey: form.encryptionKey === '' ? undefined : form.encryptionKey,
+          encryptionRequired: form.encryptionRequired,
+          pureRust: form.pureRust,
+          fbclientPath: form.fbclientPath === '' ? undefined : form.fbclientPath,
+          charset: form.charset === '' ? undefined : form.charset,
+        });
       },
-    });
-    try {
-      const args: ProfileConnectArgs = {
-        password: activeTab.form.password,
-        pureRust: profile.pureRust,
-        encryptionRequired: profile.encryptionRequired,
-      };
-      if (activeTab.form.encryptionKey !== '') {
-        args.encryptionKey = activeTab.form.encryptionKey;
-      }
-      if (activeTab.form.fbclientPath !== '') {
-        args.fbclientPath = activeTab.form.fbclientPath;
-      }
-      if (activeTab.form.charset !== '') {
-        args.charset = activeTab.form.charset;
-      }
-      const response = await connectByProfile(profileId, args);
-      patchTab(tabId, {
-        sessionId: response.sessionId,
-        results: null,
-        health: 'healthy',
-        lastPingAt: Date.now(),
-        connectedAt: Date.now(),
-      });
-      renameTab(tabId, profile.name);
-      void refreshCryptState(tabId, response.sessionId);
-      void refreshSchema(tabId, response.sessionId);
-      void refreshEngineVersion(tabId, response.sessionId);
-    } catch (err) {
-      patchTab(tabId, { error: String(err) });
-    } finally {
-      patchTab(tabId, { busy: false });
-    }
-  };
+      testConnection: (form) =>
+        fetchTransport.invoke<TestConnectionResult>('test-connection', {
+          host: form.host,
+          port: form.port,
+          database: form.database,
+          user: form.user,
+          password: form.password,
+          encryptionKey: form.encryptionKey === '' ? undefined : form.encryptionKey,
+          encryptionRequired: form.encryptionRequired,
+          pureRust: form.pureRust,
+          fbclientPath: form.fbclientPath === '' ? undefined : form.fbclientPath,
+          charset: form.charset === '' ? undefined : form.charset,
+        }),
+      pingSession: (sessionId) =>
+        fetchTransport
+          .invoke<{ engineVersion: string }>('ping-session', { sessionId })
+          .then((r) => r.engineVersion),
+    }),
+    [],
+  );
 
-  const handleConnect = async () => {
-    const tabId = activeTabId;
-    const tab = activeTab;
-    patchTab(tabId, { error: null, busy: true, cryptState: null });
-    try {
-      let response: ConnectResponse;
-      if (tab.selectedProfileId !== null) {
-        const args: ProfileConnectArgs = {
-          password: tab.form.password,
-          pureRust: tab.form.pureRust,
-          encryptionRequired: tab.form.encryptionRequired,
-        };
-        if (tab.form.encryptionKey !== '') {
-          args.encryptionKey = tab.form.encryptionKey;
-        }
-        if (tab.form.fbclientPath !== '') {
-          args.fbclientPath = tab.form.fbclientPath;
-        }
-        if (tab.form.charset !== '') {
-          args.charset = tab.form.charset;
-        }
-        response = await connectByProfile(tab.selectedProfileId, args);
-      } else {
-        response = await fetchTransport.invoke<ConnectResponse>('connect', {
-          host: tab.form.host,
-          port: tab.form.port,
-          database: tab.form.database,
-          user: tab.form.user,
-          password: tab.form.password,
-          encryptionKey: tab.form.encryptionKey === '' ? undefined : tab.form.encryptionKey,
-          encryptionRequired: tab.form.encryptionRequired,
-          pureRust: tab.form.pureRust,
-          fbclientPath: tab.form.fbclientPath === '' ? undefined : tab.form.fbclientPath,
-          charset: tab.form.charset === '' ? undefined : tab.form.charset,
-        });
-      }
-      patchTab(tabId, {
-        sessionId: response.sessionId,
-        results: null,
-        health: 'healthy',
-        lastPingAt: Date.now(),
-        connectedAt: Date.now(),
-      });
-      renameTab(tabId, tab.profileName.trim() || deriveTitle(tab.form));
-      void refreshCryptState(tabId, response.sessionId);
-      void refreshSchema(tabId, response.sessionId);
-      void refreshEngineVersion(tabId, response.sessionId);
-    } catch (err) {
-      patchTab(tabId, { error: String(err) });
-    } finally {
-      patchTab(tabId, { busy: false });
-    }
-  };
-
-  const handleReconnect = useCallback(async () => {
-    const tabId = activeTabId;
-    const tab = activeTab;
-    if (tab.health === 'reconnecting') return;
-    patchTab(tabId, { health: 'reconnecting', error: null });
-    try {
-      let response: ConnectResponse;
-      if (tab.selectedProfileId !== null) {
-        const args: ProfileConnectArgs = {
-          password: tab.form.password,
-          pureRust: tab.form.pureRust,
-          encryptionRequired: tab.form.encryptionRequired,
-        };
-        if (tab.form.encryptionKey !== '') {
-          args.encryptionKey = tab.form.encryptionKey;
-        }
-        if (tab.form.fbclientPath !== '') {
-          args.fbclientPath = tab.form.fbclientPath;
-        }
-        if (tab.form.charset !== '') {
-          args.charset = tab.form.charset;
-        }
-        response = await connectByProfile(tab.selectedProfileId, args);
-      } else {
-        response = await fetchTransport.invoke<ConnectResponse>('connect', {
-          host: tab.form.host,
-          port: tab.form.port,
-          database: tab.form.database,
-          user: tab.form.user,
-          password: tab.form.password,
-          encryptionKey: tab.form.encryptionKey === '' ? undefined : tab.form.encryptionKey,
-          encryptionRequired: tab.form.encryptionRequired,
-          pureRust: tab.form.pureRust,
-          fbclientPath: tab.form.fbclientPath === '' ? undefined : tab.form.fbclientPath,
-          charset: tab.form.charset === '' ? undefined : tab.form.charset,
-        });
-      }
-      patchTab(tabId, {
-        sessionId: response.sessionId,
-        health: 'healthy',
-        lastPingAt: Date.now(),
-        connectedAt: Date.now(),
-      });
-      const newSessionId = response.sessionId;
-      void fetchTransport
-        .invoke<{ engineVersion: string }>('ping-session', { sessionId: newSessionId })
-        .then((r) =>
-          patchTab(tabId, {
-            engineVersion: r.engineVersion.trim().length > 0 ? r.engineVersion.trim() : null,
-          }),
-        )
-        .catch(() => patchTab(tabId, { engineVersion: null }));
-    } catch (err) {
-      patchTab(tabId, { health: 'dead', error: String(err) });
-    }
-  }, [activeTab, activeTabId, patchTab]);
-
-  useHealthProbe({
+  const autoReconnect = useConnectionPrefs((s) => s.autoReconnect);
+  const {
+    handleConnect,
+    handleReconnect,
+    handleTestConnection,
+    handleQuickConnect: quickConnect,
+  } = useConnectionActions({
+    adapter: connectionAdapter,
+    activeTab,
     tabs,
-    ping: (sessionId) =>
-      fetchTransport
-        .invoke<{ engineVersion: string }>('ping-session', { sessionId })
-        .then((r) => r.engineVersion),
-    onPatch: (tabId, patch) => patchTab(tabId, patch),
+    patchTab,
+    renameTab,
+    deriveTitle,
+    autoReconnect,
+    onConnected: (tabId, sessionId) => {
+      void refreshCryptState(tabId, sessionId);
+      void refreshTxStatus(tabId, sessionId);
+      void refreshSchema(tabId, sessionId);
+      void refreshEngineVersion(tabId, sessionId);
+    },
   });
 
-  // Auto-reconnect: same single-shot-per-dead pattern as desktop.
-  const autoReconnect = useConnectionPrefs((s) => s.autoReconnect);
-  const lastAutoDeadRef = useRef<string | null>(null);
+
+  // Wires activated plugins into the interceptor chains. Runs once:
+  // the web edition activates plugins server-side at boot, so unlike
+  // the desktop shell there is no client-driven reload to react to.
   useEffect(() => {
-    if (!autoReconnect) {
-      lastAutoDeadRef.current = null;
-      return;
-    }
-    if (activeTab.health !== 'dead') {
-      lastAutoDeadRef.current = null;
-      return;
-    }
-    if (activeTab.busy) return;
-    if (lastAutoDeadRef.current === activeTab.id) return;
-    lastAutoDeadRef.current = activeTab.id;
-    void handleReconnect();
-  }, [activeTab.health, activeTab.busy, activeTab.id, autoReconnect, handleReconnect]);
+    let handle: { dispose(): void } | null = null;
+    let cancelled = false;
+    void installPluginInterceptors({
+      listInterceptors: async () => {
+        const res = await fetch('/api/plugins/interceptors', { headers: authHeaders() });
+        if (!res.ok) return [];
+        const body = (await res.json()) as {
+          interceptors: Array<{ extensionPoint: ExtensionPoint }>;
+        };
+        return body.interceptors;
+      },
+      runInterceptors: async (extensionPoint, contextJson) => {
+        const res = await fetch('/api/plugins/interceptors/run', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ extensionPoint, contextJson }),
+        });
+        if (!res.ok) {
+          // A transport failure is not a plugin verdict. Proceeding is
+          // the same fail-open rule the host applies to a trap.
+          return { verdict: { action: 'proceed' }, skipped: [] };
+        }
+        return (await res.json()) as PluginInterceptorOutcome;
+      },
+    }).then((installed) => {
+      if (cancelled) installed.dispose();
+      else handle = installed;
+    });
+    return () => {
+      cancelled = true;
+      handle?.dispose();
+    };
+  }, []);
 
-  const refreshCryptState = async (tabId: string, sessionId: string) => {
-    try {
-      const res = await fetchTransport.invoke<CryptStateResponse>('crypt-state', { sessionId });
-      patchTab(tabId, { cryptState: res.state });
-    } catch {
-      patchTab(tabId, { cryptState: null });
-    }
-  };
+  const { refreshCryptState, refreshEngineVersion, refreshSchema, refreshTxStatus } =
+    useSessionRefreshers({
+      adapter: useMemo(
+        () => ({
+          cryptState: (sessionId) =>
+            fetchTransport
+              .invoke<CryptStateResponse>('crypt-state', { sessionId })
+              .then((r) => r.state),
+          engineVersion: (sessionId) =>
+            fetchTransport
+              .invoke<{ engineVersion: string }>('ping-session', { sessionId })
+              .then((r) => r.engineVersion),
+          describeSchema: (sessionId) =>
+            fetchTransport.invoke<Schema>('describe-schema', { sessionId }),
+          transactionStatus: (sessionId) =>
+            fetchTransport.invoke<TxStatus>('transaction/status', { sessionId }),
+        }),
+        [],
+      ),
+      patchTab,
+    });
 
-  const refreshEngineVersion = async (tabId: string, sessionId: string) => {
-    try {
-      const res = await fetchTransport.invoke<{ engineVersion: string }>('ping-session', {
-        sessionId,
-      });
-      patchTab(tabId, {
-        engineVersion:
-          res.engineVersion.trim().length > 0 ? res.engineVersion.trim() : null,
-        lastPingAt: Date.now(),
-      });
-    } catch {
-      patchTab(tabId, { engineVersion: null });
-    }
-  };
-
-  const refreshSchema = async (tabId: string, sessionId: string) => {
-    try {
-      const schema = await fetchTransport.invoke<Schema>('describe-schema', { sessionId });
-      patchTab(tabId, { schema });
-    } catch (err) {
-      patchTab(tabId, { error: String(err) });
-    }
-  };
 
   const handleExecute = async () => {
     const tabId = activeTabId;
     const tab = activeTab;
     if (!tab.sessionId) return;
-    const sqlAtSend = tab.sql;
+    const decision = await resolveStatement({
+      tabId,
+      sessionId: tab.sessionId,
+      sql: tab.sql,
+    });
+    if (decision.action === 'cancel') {
+      patchTab(tabId, { error: decision.reason });
+      return;
+    }
+    const sql = decision.sql;
     const key = recentKeyOf(tab.form, tab.profileName);
     const startedAt = Date.now();
+    // Remembered so the outcome can be discarded if the tab has moved
+    // to a different session by the time it settles.
+    const ranAgainst = tab.sessionId;
     patchTab(tabId, { error: null, busy: true });
     try {
       const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
         sessionId: tab.sessionId,
-        sql: sqlAtSend,
-        profileId: tab.selectedProfileId ?? undefined,
+        sql,
+        profileId: historyKeyOf(tab.selectedProfileId, tab.form),
         historyLimit: currentHistoryLimit(),
       });
-      patchTab(tabId, { results: res, executedSql: sqlAtSend, focusedObjectName: null });
+      patchTab(tabId, { results: res, executedSql: sql, focusedObjectName: null });
       notifyMutations(res);
-      recordExec(key, sqlAtSend, startedAt, res, null);
+      recordExec(key, sql, startedAt, res, null);
+      // Manual mode opens the transaction on the first statement and
+      // counts each one after, so the indicator needs a refresh.
+      if (tab.sessionId) void refreshTxStatus(tabId, tab.sessionId);
     } catch (err) {
+      // A statement whose session the tab has since left is not a
+      // failure to report: abandoning ends the session under the
+      // in-flight execute, so this rejection is the abandon working.
+      // Writing it would stamp an error on a tab that has already
+      // reconnected and looks healthy.
+      if (isStaleSession(ranAgainst, useTabsStore.getState().tabs.find((t) => t.id === tabId)?.sessionId ?? null)) {
+        return;
+      }
       patchTab(tabId, { error: String(err) });
-      recordExec(key, sqlAtSend, startedAt, null, String(err));
+      recordExec(key, sql, startedAt, null, String(err));
     } finally {
-      patchTab(tabId, { busy: false });
+      if (!isStaleSession(ranAgainst, useTabsStore.getState().tabs.find((t) => t.id === tabId)?.sessionId ?? null)) {
+        patchTab(tabId, { busy: false });
+      }
     }
   };
 
@@ -667,19 +609,10 @@ export function App() {
         const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
-        const first = outcomes[0];
-        if (!first) {
-          throw new Error('UPDATE produced no outcome.');
-        }
-        if (first.status === 'err') {
-          throw new Error(first.error);
-        }
-        if ('Affected' in first.result && first.result.Affected.rows === 0) {
-          throw new Error('UPDATE matched zero rows.');
-        }
+        firstAffected(outcomes, 'UPDATE');
         notifyMutations(outcomes);
         recordExec(key, sql, startedAt, outcomes, null);
       } catch (err) {
@@ -713,7 +646,7 @@ export function App() {
         const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
         for (const outcome of outcomes) {
@@ -730,56 +663,54 @@ export function App() {
   );
 
   const handleStreamedExport: StreamedExportRunner = useCallback(
-    async (req: StreamedExportRequest): Promise<StreamedExportResult> => {
-      const response = await fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: req.sessionId,
-          format: req.format,
-          csvDelimiter: req.csvDelimiter,
-          scope: req.scope,
-          includeDdl: req.includeDdl ?? true,
-        }),
-      });
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `export HTTP ${response.status}`);
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get('Content-Disposition') ?? '';
-      const m = /filename="([^"]+)"/.exec(disposition);
-      const stamp = new Date()
-        .toISOString()
-        .replace(/[-:T]/g, '')
-        .slice(0, 15);
-      const suggestedFilename = m?.[1] ?? `plamenix-export-${stamp}.${req.format}`;
-      return { blob, suggestedFilename };
-    },
-    [],
+    async (req: StreamedExportRequest): Promise<StreamedExportResult> =>
+      runGuardedExport(req, {
+        tabId: activeTab.id,
+        // Raw `fetch` rather than the transport: this endpoint answers
+        // with a file, not the transport's JSON envelope.
+        transfer: async (request) => {
+          const response = await fetch('/api/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({
+              sessionId: request.sessionId,
+              format: request.format,
+              csvDelimiter: request.csvDelimiter,
+              scope: request.scope,
+              includeDdl: request.includeDdl ?? true,
+            }),
+          });
+          if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            throw new Error(text || `export HTTP ${response.status}`);
+          }
+          const blob = await response.blob();
+          const disposition = response.headers.get('Content-Disposition') ?? '';
+          const named = /filename="([^"]+)"/.exec(disposition);
+          const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+          return {
+            blob,
+            suggestedFilename: named?.[1] ?? `plamenix-export-${stamp}.${request.format}`,
+          };
+        },
+      }),
+    [activeTab.id],
   );
 
   const handleFetchTableExport = useCallback(
     async (table: TableInfo): Promise<TableExportPart> => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table.name)
-        ? table.name
-        : `"${table.name.replace(/"/g, '""')}"`;
+      const quoted = quoteIdentifier(table.name);
       const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
         sessionId: tab.sessionId,
         sql: `SELECT * FROM ${quoted}`,
       });
-      const first = outcomes[0];
-      if (!first) throw new Error(`No outcome for ${table.name}.`);
-      if (first.status === 'err') throw new Error(`${table.name}: ${first.error}`);
-      if (!('Rows' in first.result)) {
-        throw new Error(`${table.name}: SELECT did not return rows.`);
-      }
+      const { columns, rows } = firstRows(outcomes, table.name);
       return {
         table,
-        columns: first.result.Rows.columns,
-        rows: first.result.Rows.rows,
+        columns,
+        rows,
       };
     },
     [activeTab],
@@ -789,27 +720,16 @@ export function App() {
     async ({ table, predicate }: { table: string; predicate: string | null }) => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table)
-        ? table
-        : `"${table.replace(/"/g, '""')}"`;
+      const quoted = quoteIdentifier(table);
       const sql = predicate
         ? `SELECT COUNT(*) FROM ${quoted} WHERE ${predicate}`
         : `SELECT COUNT(*) FROM ${quoted}`;
-      const outcomes = await fetchTransport.invoke<StatementOutcome[]>(
-        'execute',
-        { sessionId: tab.sessionId, sql },
-      );
-      const first = outcomes[0];
-      if (!first || first.status !== 'ok' || !('Rows' in first.result)) {
-        throw new Error('COUNT(*) did not return a row.');
-      }
-      const cell = first.result.Rows.rows[0]?.cells[0];
-      if (!cell) throw new Error('COUNT(*) returned an empty row.');
-      if (cell.type === 'integer') return cell.value;
-      if (cell.type === 'float' && typeof cell.value === 'number') {
-        return cell.value;
-      }
-      throw new Error(`COUNT(*) returned an unexpected cell type: ${cell.type}.`);
+      const outcomes = await fetchTransport.invoke<StatementOutcome[]>('execute', {
+        sessionId: tab.sessionId,
+        sql,
+      });
+      const { rows } = firstRows(outcomes, 'COUNT(*)');
+      return countFromCell(rows[0]?.cells[0]);
     },
     [activeTab],
   );
@@ -818,9 +738,7 @@ export function App() {
     async ({ table, predicate }: { table: string; predicate: string | null }) => {
       const tab = activeTab;
       if (!tab.sessionId) throw new Error('No active session.');
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(table)
-        ? table
-        : `"${table.replace(/"/g, '""')}"`;
+      const quoted = quoteIdentifier(table);
       const sql = predicate
         ? `SELECT * FROM ${quoted} WHERE ${predicate}`
         : `SELECT * FROM ${quoted}`;
@@ -828,13 +746,7 @@ export function App() {
         sessionId: tab.sessionId,
         sql,
       });
-      const first = outcomes[0];
-      if (!first) throw new Error('Scoped fetch produced no outcome.');
-      if (first.status === 'err') throw new Error(first.error);
-      if (!('Rows' in first.result)) {
-        throw new Error('Scoped fetch did not return rows.');
-      }
-      return first.result.Rows.rows;
+      return firstRows(outcomes, 'Scoped fetch').rows;
     },
     [activeTab],
   );
@@ -844,9 +756,7 @@ export function App() {
       const tabId = activeTabId;
       const tab = activeTab;
       if (!tab.sessionId) return;
-      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(name)
-        ? name
-        : `"${name.replace(/"/g, '""')}"`;
+      const quoted = /^[A-Z_][A-Z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
       const sql = `SELECT * FROM ${quoted}`;
       const key = recentKeyOf(tab.form, tab.profileName);
       const startedAt = Date.now();
@@ -855,7 +765,7 @@ export function App() {
         const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
         // Show the data in the result panel without touching the editor
@@ -874,7 +784,7 @@ export function App() {
   );
 
   const handleApplyFilter = useCallback(
-    async (sql: string) => {
+    async (sql: string, options?: { recordHistory?: boolean }) => {
       const tabId = activeTabId;
       const tab = activeTab;
       if (!tab.sessionId) return;
@@ -885,7 +795,13 @@ export function App() {
         const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
           sessionId: tab.sessionId,
           sql,
-          profileId: tab.selectedProfileId ?? undefined,
+          // Omitted for the automatic re-read after a write: history is
+          // what the user ran, and the host skips recording when there
+          // is no key.
+          profileId:
+            options?.recordHistory === false
+              ? undefined
+              : historyKeyOf(tab.selectedProfileId, tab.form),
           historyLimit: currentHistoryLimit(),
         });
         patchTab(tabId, { results: res, executedSql: sql });
@@ -900,65 +816,117 @@ export function App() {
     [activeTab, activeTabId, patchTab],
   );
 
-  const handleSchemaAction = async (action: SchemaAction) => {
+  /** I5.5 — dispatch a fully-resolved `SchemaDdl` through the same
+   *  autoExecute / insert-into-editor / confirm-then-run pipeline the
+   *  built-in `SchemaAction` handler uses. Plugin schema_actions go
+   *  through this directly; built-in actions go through
+   *  `handleSchemaAction` → `schemaDdl(action)` → here. */
+  const dispatchDdl = async (ddl: SchemaDdl): Promise<boolean> => {
     const tabId = activeTabId;
     const tab = activeTab;
-    const ddl = schemaDdl(action);
-    if (ddl.autoExecute) {
-      if (!tab.sessionId) return;
-      const key = recentKeyOf(tab.form, tab.profileName);
-      const startedAt = Date.now();
-      patchTab(tabId, { error: null, busy: true });
-      try {
-        const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
-          sessionId: tab.sessionId,
-          sql: ddl.sql,
-          profileId: tab.selectedProfileId ?? undefined,
-          historyLimit: currentHistoryLimit(),
-        });
-        notifyMutations(res);
-        recordExec(key, ddl.sql, startedAt, res, null);
-        void refreshSchema(tabId, tab.sessionId);
-      } catch (err) {
-        patchTab(tabId, { error: String(err) });
-        recordExec(key, ddl.sql, startedAt, null, String(err));
-      } finally {
-        patchTab(tabId, { busy: false });
-      }
-      return;
-    }
-    if (!ddl.destructive) {
-      patchTab(tabId, { sql: ddl.sql });
-      return;
-    }
-    if (!window.confirm(ddl.confirmPrompt ?? 'Run destructive statement?')) return;
-    if (!tab.sessionId) return;
     const key = recentKeyOf(tab.form, tab.profileName);
-    const startedAt = Date.now();
-    patchTab(tabId, { error: null, busy: true, sql: ddl.sql });
+    return dispatchSchemaDdl(ddl, {
+      sessionId: tab.sessionId,
+      execute: (sql) =>
+        fetchTransport.invoke<StatementOutcome[]>('execute', {
+          sessionId: tab.sessionId,
+          sql,
+          profileId: historyKeyOf(tab.selectedProfileId, tab.form),
+          historyLimit: currentHistoryLimit(),
+        }),
+      patch: (patch) => patchTab(tabId, patch),
+      record: (sql, startedAt, outcomes, error) =>
+        recordExec(key, sql, startedAt, outcomes, error),
+      refreshSchema: () => {
+        if (tab.sessionId) void refreshSchema(tabId, tab.sessionId);
+      },
+      confirm: (prompt) => window.confirm(prompt),
+    });
+  };
+
+  const handleSchemaAction = async (action: SchemaAction) => {
+    await applySchemaAction(action, {
+      tabId: activeTabId,
+      sessionId: activeTab.sessionId,
+      dispatch: dispatchDdl,
+      patch: (patch) => patchTab(activeTabId, patch),
+    });
+  };
+
+  const handleSetTxMode = async (mode: TxMode, config: TxConfig) => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    if (!tab.sessionId) return;
+    patchTab(tabId, { busy: true });
     try {
-      const res = await fetchTransport.invoke<StatementOutcome[]>('execute', {
+      const status = await fetchTransport.invoke<TxStatus>('transaction/mode', {
         sessionId: tab.sessionId,
-        sql: ddl.sql,
-        profileId: tab.selectedProfileId ?? undefined,
-        historyLimit: currentHistoryLimit(),
+        mode,
+        config,
       });
-      patchTab(tabId, { results: res, executedSql: ddl.sql });
-      notifyMutations(res);
-      recordExec(key, ddl.sql, startedAt, res, null);
-      void refreshSchema(tabId, tab.sessionId);
+      patchTab(tabId, { txStatus: status, error: null });
     } catch (err) {
       patchTab(tabId, { error: String(err) });
-      recordExec(key, ddl.sql, startedAt, null, String(err));
     } finally {
       patchTab(tabId, { busy: false });
     }
+  };
+
+  const finishTx = async (which: 'commit' | 'rollback') => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    if (!tab.sessionId) return;
+    patchTab(tabId, { busy: true });
+    try {
+      const status = await fetchTransport.invoke<TxStatus>(`transaction/${which}`, {
+        sessionId: tab.sessionId,
+      });
+      patchTab(tabId, { txStatus: status, error: null });
+      // DDL is transactional in Firebird, so committing or discarding
+      // can change the schema.
+      void refreshSchema(tabId, tab.sessionId);
+    } catch (err) {
+      patchTab(tabId, { error: String(err) });
+    } finally {
+      patchTab(tabId, { busy: false });
+    }
+  };
+
+  /// Asks before throwing away uncommitted work. An open transaction
+  /// with nothing in it is not worth interrupting anyone over.
+  const confirmDiscardTx = (tab: TabState, what: string): boolean => {
+    if (!hasUncommittedWork(tab.txStatus)) return true;
+    const count = tab.txStatus?.pendingStatements ?? 0;
+    const statements = count === 1 ? '1 statement' : `${count} statements`;
+    return window.confirm(
+      `${what} will roll back ${statements} that have not been committed. Continue?`,
+    );
+  };
+
+  // Firebird offers no way to stop a running statement through either
+  // backend Plamenix ships, so the only honest lever is the attachment
+  // itself: detaching rolls back the transaction and the server stops
+  // the work with it. The user is told that cost before it happens.
+  const handleAbandon = async () => {
+    const tabId = activeTabId;
+    const tab = activeTab;
+    if (!tab.sessionId) return;
+    if (abandonNeedsConfirmation(tab.txStatus) && !window.confirm(describeAbandonCost(tab.txStatus))) {
+      return;
+    }
+    await abandonStatement({
+      sessionId: tab.sessionId,
+      close: (sessionId) => fetchTransport.invoke<{ closed: boolean }>('close', { sessionId }).then(() => undefined),
+      reconnect: handleReconnect,
+      onError: (message) => patchTab(tabId, { error: message }),
+    });
   };
 
   const handleDisconnect = async () => {
     const tabId = activeTabId;
     const tab = activeTab;
     if (!tab.sessionId) return;
+    if (!confirmDiscardTx(tab, 'Disconnecting')) return;
     patchTab(tabId, { error: null, busy: true });
     try {
       await fetchTransport.invoke<{ closed: boolean }>('close', { sessionId: tab.sessionId });
@@ -974,43 +942,12 @@ export function App() {
         lastPingAt: null,
         connectedAt: null,
         engineVersion: null,
+        txStatus: null,
       });
     } catch (err) {
       patchTab(tabId, { error: String(err) });
     } finally {
       patchTab(tabId, { busy: false });
-    }
-  };
-
-  const handleTestConnection = async () => {
-    const tabId = activeTabId;
-    const tab = activeTab;
-    patchTab(tabId, { testing: true, testResult: null });
-    try {
-      const res = await fetchTransport.invoke<TestConnectionResult>('test-connection', {
-        host: tab.form.host,
-        port: tab.form.port,
-        database: tab.form.database,
-        user: tab.form.user,
-        password: tab.form.password,
-        encryptionKey: tab.form.encryptionKey === '' ? undefined : tab.form.encryptionKey,
-        encryptionRequired: tab.form.encryptionRequired,
-        pureRust: tab.form.pureRust,
-        fbclientPath: tab.form.fbclientPath === '' ? undefined : tab.form.fbclientPath,
-        charset: tab.form.charset === '' ? undefined : tab.form.charset,
-      });
-      patchTab(tabId, { testResult: res });
-    } catch (err) {
-      patchTab(tabId, {
-        testResult: {
-          ok: false,
-          firebirdVersion: null,
-          error: String(err),
-          durationMs: 0,
-        },
-      });
-    } finally {
-      patchTab(tabId, { testing: false });
     }
   };
 
@@ -1028,6 +965,7 @@ export function App() {
 
   const handleTabClose = (id: string) => {
     const tab = tabs.find((t) => t.id === id);
+    if (tab && !confirmDiscardTx(tab, 'Closing this tab')) return;
     if (tab?.sessionId) {
       void fetchTransport
         .invoke<{ closed: boolean }>('close', { sessionId: tab.sessionId })
@@ -1047,24 +985,21 @@ export function App() {
   const [statsFetchedAt, setStatsFetchedAt] = useState<number | null>(null);
   const [statsTick, setStatsTick] = useState(0);
 
-  const refreshStats = useCallback(
-    async (sessionId: string) => {
-      setStatsLoading(true);
-      setStatsError(null);
-      try {
-        const next = await fetchTransport.invoke<DatabaseStats>('database-stats', {
-          sessionId,
-        });
-        setStats(next);
-        setStatsFetchedAt(Date.now());
-      } catch (err) {
-        setStatsError(String(err));
-      } finally {
-        setStatsLoading(false);
-      }
-    },
-    [],
-  );
+  const refreshStats = useCallback(async (sessionId: string) => {
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      const next = await fetchTransport.invoke<DatabaseStats>('database-stats', {
+        sessionId,
+      });
+      setStats(next);
+      setStatsFetchedAt(Date.now());
+    } catch (err) {
+      setStatsError(String(err));
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
 
   const openStats = useCallback(() => {
     if (!activeTab.sessionId) return;
@@ -1091,204 +1026,78 @@ export function App() {
     return map;
   }, [tabs, themeMode]);
 
-  const handlersRef = useRef({
-    newTab,
-    handleTabClose,
-    handleSaveProfile,
-    activeTab,
-    activeTabId,
-    setPaletteOpen,
-    setSearchOpen,
-    setShortcutsOpen,
-  });
-  handlersRef.current = {
-    newTab,
-    handleTabClose,
-    handleSaveProfile,
-    activeTab,
-    activeTabId,
-    setPaletteOpen,
-    setSearchOpen,
-    setShortcutsOpen,
-  };
+  // The dispatcher and the six shell defaults live in `@plamenix/ui`.
+  // Handlers are passed directly: the hook owns the ref that keeps the
+  // once-registered bindings pointed at the current ones.
+  // Every shipped built-in contribution, for the life of the shell.
+  // They used to register from inside the components that consumed
+  // them, which made a feature's availability depend on an unrelated
+  // component being mounted — the Format button was the visible case.
+  useBuiltinContributions();
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const h = handlersRef.current;
-      // `?` opens the cheat sheet only when the user isn't typing —
-      // question marks inside SQL or text inputs must reach the
-      // editor / form, not the modal.
-      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (isTypingTarget(e.target)) return;
-        e.preventDefault();
-        h.setShortcutsOpen(true);
-        return;
-      }
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const key = e.key.toLowerCase();
-      if (e.shiftKey && key === 'f') {
-        e.preventDefault();
-        h.setSearchOpen(true);
-        return;
-      }
-      switch (key) {
-        case 'k':
-          e.preventDefault();
-          h.setPaletteOpen(true);
-          break;
-        case 't':
-          e.preventDefault();
-          h.newTab();
-          break;
-        case 'w':
-          e.preventDefault();
-          h.handleTabClose(h.activeTabId);
-          break;
-        case 's':
-          if (
-            h.activeTab.sessionId === null &&
-            h.activeTab.profileName.trim() !== '' &&
-            !h.activeTab.busy
-          ) {
-            e.preventDefault();
-            void h.handleSaveProfile();
-          }
-          break;
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+  // Shell events reach WASM plugins from here. The host is asked which
+  // patterns anything subscribed to, so a topic nobody wants costs
+  // nothing — `editor/changed` fires as the user types.
+  const [pluginEventPatterns, setPluginEventPatterns] = useState<string[]>([]);
+  const refreshPluginEventPatterns = useCallback(() => {
+    void fetch('/api/plugins/event-patterns', { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : { patterns: [] }))
+      .then((body: { patterns?: string[] }) => setPluginEventPatterns(body.patterns ?? []))
+      .catch(() => setPluginEventPatterns([]));
   }, []);
+  useEffect(refreshPluginEventPatterns, [refreshPluginEventPatterns]);
+  usePluginEventForwarding({
+    subscribedPatterns: pluginEventPatterns,
+    forward: (topic, payload, sessionId) => {
+      void fetch('/api/plugins/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ topic, payload, sessionId }),
+      }).catch(() => {
+        // A plugin trapping on an event must not disturb the
+        // interaction that produced it; the supervisor records it.
+      });
+    },
+  });
+
+
+  // The host→client push channel. Everything the server pushes lands on
+  // the shared event bus, so a subscriber cannot tell whether it came
+  // from this edition's WebSocket or the desktop shell's Tauri events.
+  useEffect(() => connectEventChannel(), []);
+
+  useDefaultKeybindings({
+    openCheatSheet: () => setShortcutsOpen(true),
+    openSearchPalette: () => setSearchOpen(true),
+    openCommandPalette: () => setPaletteOpen(true),
+    newTab: () => newTab(),
+    closeActiveTab: () => handleTabClose(activeTabId),
+    canSaveProfile: () =>
+      activeTab.sessionId === null && activeTab.profileName.trim() !== '' && !activeTab.busy,
+    saveActiveProfile: () => void handleSaveProfile(),
+  });
 
   const mod = getModKeyLabel();
 
-  const commands = useMemo<Command[]>(() => {
-    const list: Command[] = [
-      {
-        id: 'new-tab',
-        label: 'New tab',
-        description: 'Open a fresh disconnected session',
-        icon: Plus,
-        shortcut: `${mod}T`,
-        group: 'Tabs',
-        run: () => newTab(),
-      },
-      {
-        id: 'close-tab',
-        label: 'Close tab',
-        description: 'Close the active session and tab',
-        icon: X,
-        shortcut: `${mod}W`,
-        group: 'Tabs',
-        run: () => handleTabClose(activeTabId),
-      },
-      {
-        id: 'toggle-theme',
-        label: `Switch to ${themeMode === 'dark' ? 'light' : 'dark'} theme`,
-        description: 'Flip the Plamenix theme',
-        icon: themeMode === 'dark' ? Sun : Moon,
-        group: 'Appearance',
-        run: () => toggleMode(),
-      },
-      {
-        id: 'toggle-sidebar',
-        label: 'Toggle schema sidebar',
-        description: 'Collapse or expand the schema browser',
-        icon: PanelLeftClose,
-        group: 'Appearance',
-        run: () => toggleSidebar(),
-      },
-      {
-        id: 'show-shortcuts',
-        label: 'Show keyboard shortcuts',
-        description: 'Cheat sheet of every shortcut Plamenix exposes',
-        icon: Keyboard,
-        shortcut: '?',
-        group: 'Help',
-        run: () => setShortcutsOpen(true),
-      },
-    ];
-
-    if (activeTab.sessionId === null) {
-      list.push(
-        {
-          id: 'save-profile',
-          label: 'Save connection profile',
-          description: 'Persist the current form values',
-          icon: Save,
-          shortcut: `${mod}S`,
-          group: 'Connection',
-          run: () => void handleSaveProfile(),
-        },
-        {
-          id: 'connect',
-          label: 'Connect',
-          description: 'Open a session against the current form',
-          icon: Plug,
-          shortcut: `${mod}↵`,
-          group: 'Connection',
-          run: () => void handleConnect(),
-        },
-      );
-    } else {
-      list.push(
-        {
-          id: 'execute',
-          label: 'Execute SQL',
-          description: 'Run the current editor buffer',
-          icon: Play,
-          shortcut: `${mod}↵`,
-          group: 'Session',
-          run: () => void handleExecute(),
-        },
-        {
-          id: 'refresh-schema',
-          label: 'Refresh schema',
-          description: 'Reload the table / view list',
-          icon: RefreshCw,
-          group: 'Session',
-          run: () => {
-            if (activeTab.sessionId) {
-              void refreshSchema(activeTabId, activeTab.sessionId);
-            }
-          },
-        },
-        {
-          id: 'disconnect',
-          label: 'Disconnect',
-          description: 'Close the active session',
-          icon: LogOut,
-          group: 'Session',
-          run: () => void handleDisconnect(),
-        },
-      );
-      if (activeTab.selectedProfileId !== null) {
-        list.push({
-          id: 'history',
-          label: 'Show query history',
-          description: 'Browse and replay statements run under this profile',
-          icon: History,
-          group: 'Session',
-          run: () => void openHistory(),
-        });
-      }
-    }
-    return list;
-  }, [
-    activeTab,
-    activeTabId,
-    handleConnect,
-    handleDisconnect,
-    handleExecute,
-    handleSaveProfile,
-    handleTabClose,
+  const commands = useShellCommands({
     mod,
-    newTab,
-    openHistory,
     themeMode,
-    toggleMode,
+    hasSession: activeTab.sessionId !== null,
+    hasProfile: activeTab.selectedProfileId !== null,
+    newTab: () => newTab(),
+    closeTab: () => handleTabClose(activeTabId),
+    toggleTheme: toggleMode,
     toggleSidebar,
-  ]);
+    showShortcuts: () => setShortcutsOpen(true),
+    saveProfile: () => void handleSaveProfile(),
+    connect: () => void handleConnect(),
+    execute: () => void handleExecute(),
+    refreshSchema: () => {
+      if (activeTab.sessionId) void refreshSchema(activeTabId, activeTab.sessionId);
+    },
+    disconnect: () => void handleDisconnect(),
+    openHistory: () => void openHistory(),
+  });
 
   return (
     <div className="flex h-full flex-col">
@@ -1305,14 +1114,19 @@ export function App() {
           />
         </div>
         <div className="flex shrink-0 items-stretch border-b border-edge">
+          {/* This edition's shell has no Home/Menu pair to sit between,
+              so History goes beside Settings. It opens the dialog rather
+              than a pane: there is no pane switch here to own one, and
+              the point is the same either way — history was reachable
+              only by a keyboard shortcut nobody was told about. */}
+          {activeTab.sessionId !== null && (
+            <HistoryButton active={historyOpen} onClick={() => void openHistory()} />
+          )}
           <SettingsButton onOpenDetailed={() => setShowSettings(true)} />
         </div>
       </div>
       {showSettings && activeTab.sessionId === null ? (
-        <SettingsPage
-          onClose={() => setShowSettings(false)}
-          backLabel="Back to connections"
-        />
+        <SettingsPage onClose={() => setShowSettings(false)} backLabel="Back to connections" />
       ) : activeTab.sessionId === null ? (
         <ConnectView
           tab={activeTab}
@@ -1340,7 +1154,11 @@ export function App() {
           onSqlChange={(v) => patchTab(activeTabId, { sql: v })}
           onBookmarksChange={(next) => patchTab(activeTabId, { bookmarks: next })}
           onExecute={handleExecute}
+          onAbandon={() => void handleAbandon()}
           onDisconnect={handleDisconnect}
+          onSetTxMode={(mode, config) => void handleSetTxMode(mode, config)}
+          onCommitTx={() => void finishTx('commit')}
+          onRollbackTx={() => void finishTx('rollback')}
           onOpenStats={openStats}
           onCommitCellEdit={handleCommitCellEdit}
           onCommitDdl={handleExecuteDdl}
@@ -1358,6 +1176,7 @@ export function App() {
             }
           }}
           onSchemaAction={handleSchemaAction}
+          onPluginDdl={dispatchDdl}
           onClearError={() => patchTab(activeTabId, { error: null })}
           onShowDdl={handleShowDdl}
           onBrowseTable={handleBrowseTable}
@@ -1381,7 +1200,9 @@ export function App() {
         profileLabel={
           (activeTab.selectedProfileId
             ? profiles.find((p) => p.id === activeTab.selectedProfileId)?.name
-            : null) ?? activeTab.profileName ?? 'No profile'
+            : null) ??
+          activeTab.profileName ??
+          'No profile'
         }
         entries={historyEntries}
         loading={historyLoading}
@@ -1392,38 +1213,27 @@ export function App() {
         onDeleteEntry={deleteHistoryEntry}
         onDeleteEntries={deleteHistoryEntries}
       />
-      <StatusBar
-        sessionId={activeTab.sessionId}
-        health={activeTab.health}
-        user={activeTab.form.user}
-        host={activeTab.form.host}
-        port={activeTab.form.port}
-        database={activeTab.form.database}
-        executedSql={activeTab.executedSql}
-        results={activeTab.results}
+      <ShellOverlays
+        tab={{
+          sessionId: activeTab.sessionId,
+          health: activeTab.health,
+          user: activeTab.form.user,
+          host: activeTab.form.host,
+          port: activeTab.form.port,
+          database: activeTab.form.database,
+          executedSql: activeTab.executedSql,
+          results: activeTab.results,
+          schema: activeTab.schema,
+        }}
         recentKey={recentKeyOf(activeTab.form, activeTab.profileName)}
-      />
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
         commands={commands}
-      />
-      <ShortcutsCheatSheet
-        open={shortcutsOpen}
-        onClose={() => setShortcutsOpen(false)}
-      />
-      <SearchPalette
-        open={searchOpen}
-        schema={activeTab.schema}
-        onClose={() => setSearchOpen(false)}
-        onPick={(id) =>
-          patchTab(activeTabId, {
-            sql:
-              activeTab.sql.length > 0 && !activeTab.sql.endsWith(' ')
-                ? `${activeTab.sql} ${id}`
-                : `${activeTab.sql}${id}`,
-          })
-        }
+        paletteOpen={paletteOpen}
+        onPaletteClose={() => setPaletteOpen(false)}
+        shortcutsOpen={shortcutsOpen}
+        onShortcutsClose={() => setShortcutsOpen(false)}
+        searchOpen={searchOpen}
+        onSearchClose={() => setSearchOpen(false)}
+        onSearchPick={(id) => patchTab(activeTabId, { sql: appendIdentifier(activeTab.sql, id) })}
       />
       <StatsDashboard
         open={statsOpen}
@@ -1445,6 +1255,7 @@ export function App() {
           setActive(id);
         }}
       />
+      <ConfirmationModal request={confirmHead} onConfirm={onConfirmHead} onCancel={onCancelHead} />
     </div>
   );
 }
@@ -1516,22 +1327,28 @@ interface SessionViewProps {
   onSqlChange: (value: string) => void;
   onBookmarksChange: (next: Record<string, number>) => void;
   onExecute: () => void;
+  onAbandon: () => void;
   onDisconnect: () => void;
+  onSetTxMode: (mode: TxMode, config: TxConfig) => void;
+  onCommitTx: () => void;
+  onRollbackTx: () => void;
   onRefreshSchema: () => void;
   onSchemaAction: (action: SchemaAction) => void;
+  onPluginDdl: (ddl: SchemaDdl) => void;
   onClearError: () => void;
   onOpenStats: () => void;
   onCommitCellEdit: (sql: string) => Promise<void>;
   onCommitDdl: (sql: string) => Promise<void>;
   onFetchTableExport: (table: TableInfo) => Promise<TableExportPart>;
   onStreamedExport: StreamedExportRunner;
-  onApplyFilter: (sql: string) => Promise<void>;
+  onApplyFilter: (sql: string, options?: { recordHistory?: boolean }) => Promise<void>;
   onColumnWidthsChange: (next: Record<string, number>) => void;
   onFetchBlob: (blobId: string) => Promise<string>;
   onCountAllRows: (args: { table: string; predicate: string | null }) => Promise<number>;
-  onFetchScopedRows: (args: { table: string; predicate: string | null }) => Promise<
-    { cells: ColumnValue[] }[]
-  >;
+  onFetchScopedRows: (args: {
+    table: string;
+    predicate: string | null;
+  }) => Promise<{ cells: ColumnValue[] }[]>;
   onReconnect: () => void;
   onShowDdl: (kind: DdlSourceKind, name: string) => void;
   onBrowseTable: (name: string) => Promise<void>;
@@ -1546,9 +1363,14 @@ function SessionView({
   onSqlChange,
   onBookmarksChange,
   onExecute,
+  onAbandon,
   onDisconnect,
+  onSetTxMode,
+  onCommitTx,
+  onRollbackTx,
   onRefreshSchema,
   onSchemaAction,
+  onPluginDdl,
   onClearError,
   onOpenStats,
   onCommitCellEdit,
@@ -1602,13 +1424,15 @@ function SessionView({
               schema={tab.schema}
               busy={tab.busy}
               onRefresh={onRefreshSchema}
-              onSelect={(id) =>
-                onSqlChange(
-                  tab.sql.length > 0 && !tab.sql.endsWith(' ')
-                    ? `${tab.sql} ${id}`
-                    : `${tab.sql}${id}`,
-                )
-              }
+              onCopyIdentifier={(identifier, label) => {
+                void copyText(identifier).then((ok) => {
+                  useToastStore.getState().push({
+                    kind: 'notice',
+                    tone: ok ? 'success' : 'error',
+                    title: ok ? `Copied ${label}` : `Could not copy ${label}`,
+                  });
+                });
+              }}
               onOpenObject={(target) => {
                 if (target.kind === 'table') {
                   void onBrowseTable(target.name);
@@ -1617,6 +1441,7 @@ function SessionView({
                 }
               }}
               onAction={onSchemaAction}
+              onPluginDdl={onPluginDdl}
               onNewTable={() => setSchemaEditorOpen(true)}
               onPickObjectList={(kind) => setObjectListKind(kind)}
               onNewObject={(kind) => setNewObjectKind(kind)}
@@ -1643,6 +1468,15 @@ function SessionView({
       ) : (
         <main className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
           <QueryPanel
+            transactionBar={
+              <TransactionBar
+                status={tab.txStatus}
+                busy={tab.busy}
+                onSetMode={onSetTxMode}
+                onCommit={onCommitTx}
+                onRollback={onRollbackTx}
+              />
+            }
             sessionId={tab.sessionId}
             sql={tab.sql}
             busy={tab.busy}
@@ -1654,10 +1488,21 @@ function SessionView({
             encryptionKeySupplied={tab.form.encryptionKey.length > 0}
             onSqlChange={onSqlChange}
             onExecute={onExecute}
+            onAbandon={onAbandon}
             onClose={onDisconnect}
             onBookmarksChange={onBookmarksChange}
             onOpenStats={onOpenStats}
             onReconnect={onReconnect}
+            onEditorFocus={() => emitEditorFocused({ tabId: tab.id, focusedAt: Date.now() })}
+            onEditorSelectionChange={(sel) =>
+              emitEditorSelectionChanged({
+                tabId: tab.id,
+                anchor: sel.anchor,
+                head: sel.head,
+                length: sel.head - sel.anchor,
+                changedAt: Date.now(),
+              })
+            }
           />
 
           {tab.error && <ErrorBanner error={tab.error} onDismiss={onClearError} />}
@@ -1665,11 +1510,12 @@ function SessionView({
           {(() => {
             const focusedTable =
               tab.focusedObjectName && tab.schema
-                ? tab.schema.tables.find((t) => t.name === tab.focusedObjectName) ?? null
+                ? (tab.schema.tables.find((t) => t.name === tab.focusedObjectName) ?? null)
                 : null;
             if (focusedTable && tab.results && tab.results.length > 0) {
               return (
                 <TableObjectView
+                  tabId={tab.id}
                   table={focusedTable}
                   results={tab.results}
                   schema={tab.schema}
@@ -1689,6 +1535,8 @@ function SessionView({
             if (tab.results && tab.results.length > 0) {
               return (
                 <MultiResultView
+                  tabId={tab.id}
+                  sessionId={tab.sessionId}
                   outcomes={tab.results}
                   schema={tab.schema}
                   onCommitCellEdit={onCommitCellEdit}

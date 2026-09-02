@@ -34,10 +34,12 @@ export interface Profile {
    *  against a session opened from this profile. `null` until the user
    *  has actively disconnected at least once. */
   lastDisconnectedAt?: number | null;
-  /** Optional absolute path to the Firebird native client library
-   *  (`libfbclient.so` / `.dylib` / `fbclient.dll`). When set, the
-   *  connect call hands it to rsfbclient's `with_dyn_load`. Ignored
-   *  when `pureRust` is true. */
+  /** Retained only so profiles written before this field was removed
+   *  still parse. Never written and never read on the connect path:
+   *  which shared library the server loads is the operator's decision,
+   *  taken from `FBCLIENT_PATH`, and this field was once settable
+   *  through an unauthenticated request. Drop it when a migration
+   *  rewrites the file. */
   fbclientPath?: string | null;
   /** Wire charset for the session. `null` (or missing) falls back to
    *  `UTF8`. Accepted values match `rsfbclient_core::Charset::from_str`. */
@@ -86,10 +88,10 @@ export class ProfileStore {
       createdAt: existing?.createdAt && existing.createdAt > 0 ? existing.createdAt : now,
       lastUsedAt: existing?.lastUsedAt ?? null,
       lastDisconnectedAt: existing?.lastDisconnectedAt ?? null,
-      fbclientPath:
-        typeof input.fbclientPath === 'string' && input.fbclientPath.length > 0
-          ? input.fbclientPath
-          : null,
+      // Always cleared. Writing whatever a caller supplied is what made
+      // this an arbitrary-library-load vector, and preserving a value
+      // an earlier version stored would keep it open.
+      fbclientPath: null,
       charset:
         typeof input.charset === 'string' && input.charset.length > 0
           ? input.charset

@@ -70,13 +70,13 @@ function requireNative() {
   } else if (process.platform === 'android') {
     if (process.arch === 'arm64') {
       try {
-        return require('./plamenix-fbclient.android-arm64.node')
+        return require('./plamenix-native.android-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-android-arm64')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-android-arm64/package.json').version
+        const binding = require('@plamenix/native-android-arm64')
+        const bindingPackageVersion = require('@plamenix/native-android-arm64/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -86,13 +86,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm') {
       try {
-        return require('./plamenix-fbclient.android-arm-eabi.node')
+        return require('./plamenix-native.android-arm-eabi.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-android-arm-eabi')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-android-arm-eabi/package.json').version
+        const binding = require('@plamenix/native-android-arm-eabi')
+        const bindingPackageVersion = require('@plamenix/native-android-arm-eabi/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -107,13 +107,13 @@ function requireNative() {
     if (process.arch === 'x64') {
       if (process.config?.variables?.shlib_suffix === 'dll.a' || process.config?.variables?.node_target_type === 'shared_library') {
         try {
-        return require('./plamenix-fbclient.win32-x64-gnu.node')
+        return require('./plamenix-native.win32-x64-gnu.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-win32-x64-gnu')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-win32-x64-gnu/package.json').version
+        const binding = require('@plamenix/native-win32-x64-gnu')
+        const bindingPackageVersion = require('@plamenix/native-win32-x64-gnu/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -123,13 +123,13 @@ function requireNative() {
       }
       } else {
         try {
-        return require('./plamenix-fbclient.win32-x64-msvc.node')
+        return require('./plamenix-native.win32-x64-msvc.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-win32-x64-msvc')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-win32-x64-msvc/package.json').version
+        const binding = require('@plamenix/native-win32-x64-msvc')
+        const bindingPackageVersion = require('@plamenix/native-win32-x64-msvc/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -140,13 +140,13 @@ function requireNative() {
       }
     } else if (process.arch === 'ia32') {
       try {
-        return require('./plamenix-fbclient.win32-ia32-msvc.node')
+        return require('./plamenix-native.win32-ia32-msvc.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-win32-ia32-msvc')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-win32-ia32-msvc/package.json').version
+        const binding = require('@plamenix/native-win32-ia32-msvc')
+        const bindingPackageVersion = require('@plamenix/native-win32-ia32-msvc/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -156,13 +156,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm64') {
       try {
-        return require('./plamenix-fbclient.win32-arm64-msvc.node')
+        return require('./plamenix-native.win32-arm64-msvc.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-win32-arm64-msvc')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-win32-arm64-msvc/package.json').version
+        const binding = require('@plamenix/native-win32-arm64-msvc')
+        const bindingPackageVersion = require('@plamenix/native-win32-arm64-msvc/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -175,13 +175,13 @@ function requireNative() {
     }
   } else if (process.platform === 'darwin') {
     try {
-      return require('./plamenix-fbclient.darwin-universal.node')
+      return require('./plamenix-native.darwin-universal.node')
     } catch (e) {
       loadErrors.push(e)
     }
     try {
-      const binding = require('@plamenix/fbclient-node-darwin-universal')
-      const bindingPackageVersion = require('@plamenix/fbclient-node-darwin-universal/package.json').version
+      const binding = require('@plamenix/native-darwin-universal')
+      const bindingPackageVersion = require('@plamenix/native-darwin-universal/package.json').version
       if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
         throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
       }
@@ -191,13 +191,13 @@ function requireNative() {
     }
     if (process.arch === 'x64') {
       try {
-        return require('./plamenix-fbclient.darwin-x64.node')
+        return require('./plamenix-native.darwin-x64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-darwin-x64')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-darwin-x64/package.json').version
+        const binding = require('@plamenix/native-darwin-x64')
+        const bindingPackageVersion = require('@plamenix/native-darwin-x64/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -207,13 +207,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm64') {
       try {
-        return require('./plamenix-fbclient.darwin-arm64.node')
+        return require('./plamenix-native.darwin-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-darwin-arm64')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-darwin-arm64/package.json').version
+        const binding = require('@plamenix/native-darwin-arm64')
+        const bindingPackageVersion = require('@plamenix/native-darwin-arm64/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -227,13 +227,13 @@ function requireNative() {
   } else if (process.platform === 'freebsd') {
     if (process.arch === 'x64') {
       try {
-        return require('./plamenix-fbclient.freebsd-x64.node')
+        return require('./plamenix-native.freebsd-x64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-freebsd-x64')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-freebsd-x64/package.json').version
+        const binding = require('@plamenix/native-freebsd-x64')
+        const bindingPackageVersion = require('@plamenix/native-freebsd-x64/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -243,13 +243,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm64') {
       try {
-        return require('./plamenix-fbclient.freebsd-arm64.node')
+        return require('./plamenix-native.freebsd-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-freebsd-arm64')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-freebsd-arm64/package.json').version
+        const binding = require('@plamenix/native-freebsd-arm64')
+        const bindingPackageVersion = require('@plamenix/native-freebsd-arm64/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -264,13 +264,13 @@ function requireNative() {
     if (process.arch === 'x64') {
       if (isMusl()) {
         try {
-          return require('./plamenix-fbclient.linux-x64-musl.node')
+          return require('./plamenix-native.linux-x64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-x64-musl')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-x64-musl/package.json').version
+          const binding = require('@plamenix/native-linux-x64-musl')
+          const bindingPackageVersion = require('@plamenix/native-linux-x64-musl/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -280,13 +280,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./plamenix-fbclient.linux-x64-gnu.node')
+          return require('./plamenix-native.linux-x64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-x64-gnu')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-x64-gnu/package.json').version
+          const binding = require('@plamenix/native-linux-x64-gnu')
+          const bindingPackageVersion = require('@plamenix/native-linux-x64-gnu/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -298,13 +298,13 @@ function requireNative() {
     } else if (process.arch === 'arm64') {
       if (isMusl()) {
         try {
-          return require('./plamenix-fbclient.linux-arm64-musl.node')
+          return require('./plamenix-native.linux-arm64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-arm64-musl')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-arm64-musl/package.json').version
+          const binding = require('@plamenix/native-linux-arm64-musl')
+          const bindingPackageVersion = require('@plamenix/native-linux-arm64-musl/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -314,13 +314,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./plamenix-fbclient.linux-arm64-gnu.node')
+          return require('./plamenix-native.linux-arm64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-arm64-gnu')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-arm64-gnu/package.json').version
+          const binding = require('@plamenix/native-linux-arm64-gnu')
+          const bindingPackageVersion = require('@plamenix/native-linux-arm64-gnu/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -332,13 +332,13 @@ function requireNative() {
     } else if (process.arch === 'arm') {
       if (isMusl()) {
         try {
-          return require('./plamenix-fbclient.linux-arm-musleabihf.node')
+          return require('./plamenix-native.linux-arm-musleabihf.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-arm-musleabihf')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-arm-musleabihf/package.json').version
+          const binding = require('@plamenix/native-linux-arm-musleabihf')
+          const bindingPackageVersion = require('@plamenix/native-linux-arm-musleabihf/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -348,13 +348,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./plamenix-fbclient.linux-arm-gnueabihf.node')
+          return require('./plamenix-native.linux-arm-gnueabihf.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-arm-gnueabihf')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-arm-gnueabihf/package.json').version
+          const binding = require('@plamenix/native-linux-arm-gnueabihf')
+          const bindingPackageVersion = require('@plamenix/native-linux-arm-gnueabihf/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -366,13 +366,13 @@ function requireNative() {
     } else if (process.arch === 'loong64') {
       if (isMusl()) {
         try {
-          return require('./plamenix-fbclient.linux-loong64-musl.node')
+          return require('./plamenix-native.linux-loong64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-loong64-musl')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-loong64-musl/package.json').version
+          const binding = require('@plamenix/native-linux-loong64-musl')
+          const bindingPackageVersion = require('@plamenix/native-linux-loong64-musl/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -382,13 +382,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./plamenix-fbclient.linux-loong64-gnu.node')
+          return require('./plamenix-native.linux-loong64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-loong64-gnu')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-loong64-gnu/package.json').version
+          const binding = require('@plamenix/native-linux-loong64-gnu')
+          const bindingPackageVersion = require('@plamenix/native-linux-loong64-gnu/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -400,13 +400,13 @@ function requireNative() {
     } else if (process.arch === 'riscv64') {
       if (isMusl()) {
         try {
-          return require('./plamenix-fbclient.linux-riscv64-musl.node')
+          return require('./plamenix-native.linux-riscv64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-riscv64-musl')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-riscv64-musl/package.json').version
+          const binding = require('@plamenix/native-linux-riscv64-musl')
+          const bindingPackageVersion = require('@plamenix/native-linux-riscv64-musl/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -416,13 +416,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./plamenix-fbclient.linux-riscv64-gnu.node')
+          return require('./plamenix-native.linux-riscv64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@plamenix/fbclient-node-linux-riscv64-gnu')
-          const bindingPackageVersion = require('@plamenix/fbclient-node-linux-riscv64-gnu/package.json').version
+          const binding = require('@plamenix/native-linux-riscv64-gnu')
+          const bindingPackageVersion = require('@plamenix/native-linux-riscv64-gnu/package.json').version
           if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -433,13 +433,13 @@ function requireNative() {
       }
     } else if (process.arch === 'ppc64') {
       try {
-        return require('./plamenix-fbclient.linux-ppc64-gnu.node')
+        return require('./plamenix-native.linux-ppc64-gnu.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-linux-ppc64-gnu')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-linux-ppc64-gnu/package.json').version
+        const binding = require('@plamenix/native-linux-ppc64-gnu')
+        const bindingPackageVersion = require('@plamenix/native-linux-ppc64-gnu/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -449,13 +449,13 @@ function requireNative() {
       }
     } else if (process.arch === 's390x') {
       try {
-        return require('./plamenix-fbclient.linux-s390x-gnu.node')
+        return require('./plamenix-native.linux-s390x-gnu.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-linux-s390x-gnu')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-linux-s390x-gnu/package.json').version
+        const binding = require('@plamenix/native-linux-s390x-gnu')
+        const bindingPackageVersion = require('@plamenix/native-linux-s390x-gnu/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -469,13 +469,13 @@ function requireNative() {
   } else if (process.platform === 'openharmony') {
     if (process.arch === 'arm64') {
       try {
-        return require('./plamenix-fbclient.openharmony-arm64.node')
+        return require('./plamenix-native.openharmony-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-openharmony-arm64')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-openharmony-arm64/package.json').version
+        const binding = require('@plamenix/native-openharmony-arm64')
+        const bindingPackageVersion = require('@plamenix/native-openharmony-arm64/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -485,13 +485,13 @@ function requireNative() {
       }
     } else if (process.arch === 'x64') {
       try {
-        return require('./plamenix-fbclient.openharmony-x64.node')
+        return require('./plamenix-native.openharmony-x64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-openharmony-x64')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-openharmony-x64/package.json').version
+        const binding = require('@plamenix/native-openharmony-x64')
+        const bindingPackageVersion = require('@plamenix/native-openharmony-x64/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -501,13 +501,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm') {
       try {
-        return require('./plamenix-fbclient.openharmony-arm.node')
+        return require('./plamenix-native.openharmony-arm.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@plamenix/fbclient-node-openharmony-arm')
-        const bindingPackageVersion = require('@plamenix/fbclient-node-openharmony-arm/package.json').version
+        const binding = require('@plamenix/native-openharmony-arm')
+        const bindingPackageVersion = require('@plamenix/native-openharmony-arm/package.json').version
         if (bindingPackageVersion !== '1.0.0-beta.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 1.0.0-beta.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -529,7 +529,7 @@ if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
   let wasiBinding = null
   let wasiBindingError = null
   try {
-    wasiBinding = require('./plamenix-fbclient.wasi.cjs')
+    wasiBinding = require('./plamenix-native.wasi.cjs')
     nativeBinding = wasiBinding
   } catch (err) {
     if (process.env.NAPI_RS_FORCE_WASI) {
@@ -538,7 +538,7 @@ if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
   }
   if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
     try {
-      wasiBinding = require('@plamenix/fbclient-node-wasm32-wasi')
+      wasiBinding = require('@plamenix/native-wasm32-wasi')
       nativeBinding = wasiBinding
     } catch (err) {
       if (process.env.NAPI_RS_FORCE_WASI) {
@@ -576,17 +576,49 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.activatePlugin = nativeBinding.activatePlugin
+module.exports.auditRecent = nativeBinding.auditRecent
+module.exports.auditRecord = nativeBinding.auditRecord
+module.exports.beginTransaction = nativeBinding.beginTransaction
+module.exports.clearCallContext = nativeBinding.clearCallContext
 module.exports.close = nativeBinding.close
+module.exports.commitTransaction = nativeBinding.commitTransaction
 module.exports.connect = nativeBinding.connect
 module.exports.cryptState = nativeBinding.cryptState
 module.exports.databaseStats = nativeBinding.databaseStats
+module.exports.deactivatePlugin = nativeBinding.deactivatePlugin
 module.exports.describeSchema = nativeBinding.describeSchema
+module.exports.emitEvent = nativeBinding.emitEvent
+module.exports.eventPatterns = nativeBinding.eventPatterns
 module.exports.execute = nativeBinding.execute
 module.exports.executeBatch = nativeBinding.executeBatch
 module.exports.exportQuery = nativeBinding.exportQuery
 module.exports.fetchBlob = nativeBinding.fetchBlob
+module.exports.grantAdd = nativeBinding.grantAdd
+module.exports.grantList = nativeBinding.grantList
+module.exports.grantListAll = nativeBinding.grantListAll
+module.exports.grantPermission = nativeBinding.grantPermission
+module.exports.grantPurgePlugin = nativeBinding.grantPurgePlugin
+module.exports.grantRemove = nativeBinding.grantRemove
+module.exports.historyClear = nativeBinding.historyClear
+module.exports.historyDelete = nativeBinding.historyDelete
+module.exports.historyDeleteMany = nativeBinding.historyDeleteMany
+module.exports.historyList = nativeBinding.historyList
+module.exports.historyRecord = nativeBinding.historyRecord
+module.exports.historySetLabel = nativeBinding.historySetLabel
+module.exports.initMeta = nativeBinding.initMeta
 module.exports.initTracing = nativeBinding.initTracing
+module.exports.listActive = nativeBinding.listActive
 module.exports.listAliases = nativeBinding.listAliases
+module.exports.listInterceptors = nativeBinding.listInterceptors
+module.exports.loadPlugin = nativeBinding.loadPlugin
 module.exports.ping = nativeBinding.ping
 module.exports.pingSession = nativeBinding.pingSession
+module.exports.reloadPlugin = nativeBinding.reloadPlugin
+module.exports.revokePermission = nativeBinding.revokePermission
+module.exports.rollbackTransaction = nativeBinding.rollbackTransaction
+module.exports.runInterceptors = nativeBinding.runInterceptors
+module.exports.setCallContext = nativeBinding.setCallContext
+module.exports.setTransactionMode = nativeBinding.setTransactionMode
 module.exports.testConnection = nativeBinding.testConnection
+module.exports.transactionStatus = nativeBinding.transactionStatus
